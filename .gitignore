@@ -14,6 +14,7 @@ dist/
 # Virtual environments
 .venv/
 venv/
+my_env/
 env/
 ENV/
 
@@ -37,3 +38,8 @@ Thumbs.db
 agent/venv/
 __pycache__/
 *.py[cod]
+
+mongo/mongo_data/
+*.arrow
+travel_posts.jsonl
+preprocessing/admin1CodesASCII.txt
