@@ -9,6 +9,10 @@
 !backend/
 # Person B's graph package; silently absent until it exists.
 !agent/
+# Person A's retrieval (data.search) + the two preprocessing modules it imports at runtime.
+!data/
+!preprocessing/embed_chunks.py
+!preprocessing/topic_tagger.py
 
 # Re-exclude junk inside the allowed directories.
 **/__pycache__

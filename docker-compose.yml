@@ -55,6 +55,12 @@ services:
       # directConnection=true: atlas-local is a single-node replica set; without it the
       # driver would try to reach the member by its advertised replica-set host name.
       MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/?directConnection=true}
+      # Query embeddings (data.search). Inside the container localhost is the container, so the
+      # .env EMBED_HOST (often http://localhost:11434) is replaced by the host machine's Ollama.
+      EMBED_HOST: ${DOCKER_EMBED_HOST:-http://host.docker.internal:11434}
+    extra_hosts:
+      # host.docker.internal on Linux too (Docker Desktop provides it on Mac/Windows).
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:${BACKEND_HOST_PORT:-8000}:8000"
     depends_on:
@@ -87,8 +93,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    # Opt-in until ./frontend exists; an unconditional build would break `up --build`.
-    profiles: ["frontend"]
+    # Static UI + /api proxy to the backend (frontend/nginx.conf.template). http://localhost:8501
     build: ./frontend
     ports:
       - "127.0.0.1:8501:8501"
