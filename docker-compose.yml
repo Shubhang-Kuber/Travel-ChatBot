@@ -1,0 +1,124 @@
+# WanderChat local stack. See backend/README.md.
+#
+#   docker compose up --build                     # mongo + backend (default)
+#   docker compose --profile test run --rm test   # test suite against the real mongo
+#   docker compose --profile ollama up -d         # + local LLM (offline mode)
+#   docker compose --profile frontend up --build  # + frontend (once ./frontend exists)
+#   docker compose down -v                        # stop and DELETE all data volumes
+#
+# No secrets live in this file. JWT_SECRET comes from .env (gitignored; copy .env.example).
+
+name: wanderchat
+
+services:
+  mongo:
+    # Atlas Local = mongod + mongot (Atlas Search / Vector Search), single-node replica
+    # set. Pinned to an exact build tag; bump deliberately.
+    image: mongodb/mongodb-atlas-local:8.0.34-20261029T122752Z
+    hostname: mongo
+    ports:
+      # Loopback only: this dev instance has no authentication. Host port overridable
+      # (MONGO_HOST_PORT in .env) for machines that already run a local mongod on 27017.
+      # Containers always reach it as mongo:27017 regardless.
+      - "127.0.0.1:${MONGO_HOST_PORT:-27017}:27017"
+    volumes:
+      - mongo-data:/data/db
+      - mongo-config:/data/configdb
+      # mongot's search/vector index files. Not a declared VOLUME in the image, so
+      # without this they would be lost (and rebuilt) whenever the container is recreated.
+      - mongot-data:/data/mongot
+    healthcheck:
+      # The image's own probe, with tighter timing than its defaults (30s interval).
+      test: ["CMD", "/usr/local/bin/runner", "healthcheck"]
+      interval: 10s
+      timeout: 10s
+      retries: 6
+      start_period: 120s
+      start_interval: 2s
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      target: runtime
+    image: wanderchat-backend:local
+    # JWT_SECRET comes ONLY from .env. Deliberately no `${JWT_SECRET:?}` and no
+    # `required: true` here: compose evaluates both for the WHOLE file, even for
+    # services that aren't selected, which would block `--profile test run test` on a
+    # fresh clone. A missing or short secret still fails loudly: backend startup exits
+    # with "ConfigError: JWT_SECRET is required and must be at least 32 characters"
+    # (backend/config.py) and the container never becomes healthy.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # directConnection=true: atlas-local is a single-node replica set; without it the
+      # driver would try to reach the member by its advertised replica-set host name.
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/?directConnection=true}
+    ports:
+      - "127.0.0.1:${BACKEND_HOST_PORT:-8000}:8000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      # Same probe as the Dockerfile HEALTHCHECK (stdlib only; non-200 => unhealthy).
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+      start_interval: 2s
+    restart: unless-stopped
+
+  ollama:
+    # Offline mode: local LLM for Person B's graph. Multi-GB image, so opt-in only.
+    profiles: ["ollama"]
+    image: ollama/ollama:0.40.13
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  frontend:
+    # Opt-in until ./frontend exists; an unconditional build would break `up --build`.
+    profiles: ["frontend"]
+    build: ./frontend
+    ports:
+      - "127.0.0.1:8501:8501"
+    environment:
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  test:
+    profiles: ["test"]
+    build:
+      context: .
+      target: test
+    image: wanderchat-backend:test
+    environment:
+      # Test-only values. This service never reads .env, so tests are hermetic.
+      JWT_SECRET: test-only-not-a-secret-0123456789abcdef
+      MONGO_URI: mongodb://mongo:27017/?directConnection=true
+      MONGO_DB: wanderchat_test
+      USE_MOCK_GRAPH: "true"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    command: ["pytest"]
+    restart: "no"
+
+volumes:
+  mongo-data:
+  mongo-config:
+  mongot-data:
+  ollama-data:

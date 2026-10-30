@@ -1,0 +1,44 @@
+# WanderChat backend: runtime dependencies (installed into the Docker runtime image).
+#
+# Every package is pinned with ==, including transitive dependencies, so two builds
+# resolve to exactly the same set. The set was resolved and frozen inside
+# python:3.12.16-slim-trixie (the Dockerfile base image) with:
+#   docker run --rm python:3.12.16-slim-trixie sh -c "pip install <direct deps> && pip freeze"
+#
+# To upgrade: change the direct pin, re-run the command above, paste the freeze back in,
+# then rebuild and run the test suite (docker compose --profile test run --rm test).
+#
+# Person B's agent/ package: add its dependencies (langgraph, ...) HERE and re-freeze, so
+# the backend and the graph are resolved together as one consistent set.
+
+# ---- direct dependencies ------------------------------------------------------------
+fastapi==0.162.0
+uvicorn==0.54.0
+pydantic==2.14.2
+email-validator==2.3.0
+pymongo==4.19.0
+# >=3.4.0 is required (fixes CVE-2024-33663 / CVE-2024-33664).
+python-jose[cryptography]==3.5.0
+# Used directly; passlib is deliberately NOT used (unmaintained, breaks on bcrypt>=4.1).
+bcrypt==5.0.0
+
+# ---- transitive dependencies (frozen) -----------------------------------------------
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+cffi==2.1.1
+click==8.5.0
+cryptography==50.0.2
+dnspython==2.9.1
+ecdsa==0.19.2
+h11==0.16.0
+idna==3.20
+opentelemetry-api==1.45.2
+pyasn1==0.6.5
+pycparser==3.12
+pydantic_core==2.50.2
+rsa==4.9.1
+six==1.17.0
+starlette==1.10.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
