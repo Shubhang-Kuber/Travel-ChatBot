@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TravelBot - AI Travel Assistant</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+    <header class="hero-header">
+        <div class="hero-content">
+            <h1 class="hero-title">
+                <span class="hero-text">Travel</span>
+                <span class="hero-text-accent">Bot</span>
+                <span class="hero-cursor">_</span>
+            </h1>
+            <p class="hero-subtitle">Your AI-Powered Travel Companion</p>
+        </div>
+    </header>
+    <div class="container">
+        <!-- Chat Assistant -->
+        <div class="assistant-terminal">
+            <div class="terminal-header">
+                <div class="terminal-dots">
+                    <div class="dot"></div>
+                    <div class="dot"></div>
+                    <div class="dot"></div>
+                </div>
+                <div class="terminal-title">Travel Assistant</div>
+                <div class="terminal-actions" id="terminal-actions" hidden>
+                    <span class="terminal-user" id="terminal-user"></span>
+                    <button type="button" class="terminal-btn" id="new-trip" title="Start a new conversation">
+                        <i class="fas fa-plus"></i> New trip
+                    </button>
+                    <button type="button" class="terminal-btn" id="sign-out" title="Sign out">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="terminal-body" id="terminal-body">
+                <!-- Messages will be added here dynamically -->
+            </div>
+            <form class="chat-input" id="chat-form" autocomplete="off">
+                <span class="chat-prompt">&gt;</span>
+                <input type="text" id="chat-input" class="chat-input-field" maxlength="4000"
+                       placeholder="Sign in to chat" aria-label="Message" disabled>
+                <button type="submit" class="chat-send" id="chat-send" title="Send" disabled>
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </form>
+        </div>
+
+        <!-- Form Section -->
+        <div class="form-section" id="form-section">
+            <button class="minimize-btn" id="minimize-btn" title="Minimize Form">
+                <i class="fas fa-minus"></i>
+            </button>
+
+            <div class="expand-icon" id="expand-icon">
+                <i class="fas fa-edit"></i>
+            </div>
+
+            <!-- Sign in / sign up (shown until logged in) -->
+            <div class="form-content" id="auth-content">
+                <div class="form-header">
+                    <h1 class="form-title">Welcome</h1>
+                    <p class="form-subtitle">Sign in to start planning with TravelBot</p>
+                </div>
+
+                <div class="auth-tabs" role="tablist">
+                    <button type="button" class="auth-tab active" data-mode="login">Sign in</button>
+                    <button type="button" class="auth-tab" data-mode="signup">Create account</button>
+                </div>
+
+                <form class="itinerary-form" id="auth-form">
+                    <div class="form-group">
+                        <label class="form-label" for="auth-email">Email</label>
+                        <input type="email" id="auth-email" class="form-input" placeholder="you@example.com" autocomplete="email" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="auth-password">Password</label>
+                        <input type="password" id="auth-password" class="form-input" placeholder="At least 8 characters" autocomplete="current-password" required>
+                    </div>
+                    <p class="auth-error" id="auth-error" role="alert" hidden></p>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary" id="auth-submit">
+                            <i class="fas fa-sign-in-alt"></i>
+                            <span id="auth-submit-label">Sign in</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Itinerary planner (shown once logged in) -->
+            <div class="form-content" id="plan-content" hidden>
+                <div class="form-header">
+                    <h1 class="form-title">Plan Your Journey</h1>
+                    <p class="form-subtitle">Create your perfect itinerary with TravelBot's assistance</p>
+                </div>
+
+                <form class="itinerary-form" id="itinerary-form">
+                    <div class="stops-container" id="stops-container">
+                        <!-- Stops will be dynamically added here -->
+                    </div>
+
+                    <button type="button" class="btn btn-secondary add-stop-btn" id="add-stop">
+                        <i class="fas fa-plus"></i>
+                        Add Another Stop
+                    </button>
+
+                    <div class="form-group">
+                        <label class="form-label" for="trip-notes">Interests or questions (optional)</label>
+                        <textarea id="trip-notes" class="form-input form-textarea" rows="3" maxlength="1000"
+                                  placeholder="e.g. budget trip, love street food, getting around by train"></textarea>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary" id="plan-submit">
+                            <i class="fas fa-magic"></i>
+                            Get AI Suggestions
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script defer src="./script.js"></script>
+</body>
+</html>
