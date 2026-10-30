@@ -205,8 +205,9 @@ def no_agent(monkeypatch):
     return monkeypatch
 
 
-def test_load_real_graph_missing_names_module(no_agent, tmp_path) -> None:
-    no_agent.syspath_prepend(str(tmp_path))  # empty dir: still no agent package
+def test_load_real_graph_missing_names_module(no_agent) -> None:
+    # The real agent/ package exists in the repo; None in sys.modules makes its import fail.
+    no_agent.setitem(sys.modules, "agent", None)
     with pytest.raises(RuntimeError, match="agent.graph:graph"):
         load_graph(make_settings(use_mock_graph=False))
 

@@ -6,6 +6,7 @@ from urllib.request import Request, urlopen
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
@@ -16,6 +17,8 @@ from agent.state import AgentState
 SearchFunction = Callable[[str, str | None], list[dict[str, Any]]]
 
 MAX_RETRIES = 2
+# LangGraph skips LLM calls carrying this tag in stream_mode="messages".
+NOSTREAM = {"tags": ["nostream"]}
 
 
 def _get_json(url: str, request: Request | None = None) -> dict[str, Any]:
@@ -414,7 +417,10 @@ def create_graph(
                         default=str,
                     )
                 ),
-            ]
+            ],
+            # Raw structured-output JSON must not reach the user; the formatted
+            # AIMessage this node returns is what gets streamed.
+            config=NOSTREAM,
         )
 
         itinerary = build_itinerary(structured_plan.model_dump())
@@ -475,4 +481,5 @@ def _default_search_stored_tips(
     return search_stored_tips(query, destination)
 
 
-graph = create_graph(_default_search_stored_tips)
+# In-memory per-thread history (backend runs one uvicorn worker); lost on restart.
+graph = create_graph(_default_search_stored_tips, checkpointer=InMemorySaver())

@@ -186,8 +186,16 @@ comments first-class retrieval units via chunks + hybrid search.
   `chunks_vector` + `chunks_text`, index on `chunks.post_no`.
 - Raw data (`data-00000-of-00001.arrow`, `travel_posts.jsonl`) at repo root; scripts resolve paths from their own
   location, so they run from any cwd.
-- Next: `retrieve.py` (vector + `$search`, client-side RRF instead of `$rankFusion`, group + optional rerank);
-  backend + LangGraph built separately by teammates.
+- Done: `data/search.py` (agent imports `data.search.search_stored_tips(query, destination)`). Env `MONGODB_URI`
+  (Atlas; `MONGO_URI` is backend's local Mongo) + `TIPS_DB` (default `travel`) + `EMBED_*`. Destination free text
+  -> keys via `posts.distinct("destination_tags")` aliases ("Catalonia, Spain", bare state if unique), cities via
+  `DestinationTagger` if spaCy model present; state key with < 5 posts widens to country. `$vectorSearch`
+  (float32 query vector, `$in` filter) + `$search` (BM25, tag filter, topic `should` boost) in parallel, client RRF
+  (k=60), B5 grouping (best chunk + 0.2 x next 2, topic bonuses, dot < 0.2 halved), top 5 posts x 3 chunks.
+  Embed host down -> text-only. `search(..., exclude_post_nos=)` for B6b. CLI: `python -m data.search "q" --dest X`.
+  Tested offline with fake DB only; live run + B7 queries pending. No rerank yet.
+- Runtime deps where agent runs: `pymongo`, `spacy` (topic_tagger, blank model); optional `en_core_web_md` +
+  `geonamescache` for city destinations.
 
 ### B6b. Follow-up / cross questions (multi-turn)
 Topic tags are what make follow-ups work: user asks "Japan 2 weeks itinerary?" then "what about flights?",
