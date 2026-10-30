@@ -1,0 +1,22 @@
+# Allowlist: ignore everything, then re-include only what the image needs.
+# Anything new (.env, .git, notes, images, venvs) stays out of the build context by
+# default, so secrets and junk cannot leak into an image by accident.
+*
+
+!requirements.txt
+!requirements-dev.txt
+!pytest.ini
+!backend/
+# Person B's graph package; silently absent until it exists.
+!agent/
+
+# Re-exclude junk inside the allowed directories.
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.coverage
+**/htmlcov
+**/.env
+**/.env.*
+# Docs are not needed at runtime (and editing a README should not rebuild the image).
+**/*.md
