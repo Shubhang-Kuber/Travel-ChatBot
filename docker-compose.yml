@@ -55,9 +55,10 @@ services:
       # directConnection=true: atlas-local is a single-node replica set; without it the
       # driver would try to reach the member by its advertised replica-set host name.
       MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/?directConnection=true}
-      # Query embeddings (data.search). Inside the container localhost is the container, so the
-      # .env EMBED_HOST (often http://localhost:11434) is replaced by the host machine's Ollama.
-      EMBED_HOST: ${DOCKER_EMBED_HOST:-http://host.docker.internal:11434}
+      # Query embeddings (data.search). Default: the compose `ollama` service (COMPOSE_PROFILES=ollama).
+      # Using a natively installed Ollama instead: DOCKER_EMBED_HOST=http://host.docker.internal:11434.
+      # No depends_on: without Ollama, search falls back to keyword-only instead of the backend not starting.
+      EMBED_HOST: ${DOCKER_EMBED_HOST:-http://ollama:11434}
     extra_hosts:
       # host.docker.internal on Linux too (Docker Desktop provides it on Mac/Windows).
       - "host.docker.internal:host-gateway"
@@ -77,11 +78,17 @@ services:
     restart: unless-stopped
 
   ollama:
-    # Offline mode: local LLM for Person B's graph. Multi-GB image, so opt-in only.
+    # Query embeddings for data.search (nomic-embed-text, CPU is enough) and optionally a local LLM
+    # for Person B's graph. Enabled by COMPOSE_PROFILES=ollama in .env (the .env.example default).
     profiles: ["ollama"]
     image: ollama/ollama:0.40.13
+    environment:
+      # Keep the model loaded; the default unloads it after 5 idle minutes (slow next question).
+      OLLAMA_KEEP_ALIVE: "-1"
     ports:
-      - "127.0.0.1:11434:11434"
+      # Localhost only: Ollama has no auth. The backend uses the internal network, not this port;
+      # it is for scripts run on the host. Change OLLAMA_HOST_PORT if a native Ollama uses 11434.
+      - "127.0.0.1:${OLLAMA_HOST_PORT:-11434}:11434"
     volumes:
       - ollama-data:/root/.ollama
     healthcheck:
@@ -91,6 +98,19 @@ services:
       retries: 5
       start_period: 30s
     restart: unless-stopped
+
+  ollama-init:
+    # One-shot: pull the embedding model into the ollama-data volume on first start (skipped after).
+    profiles: ["ollama"]
+    image: ollama/ollama:0.40.13
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["ollama show nomic-embed-text >/dev/null 2>&1 || ollama pull nomic-embed-text"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
 
   frontend:
     # Static UI + /api proxy to the backend (frontend/nginx.conf.template). http://localhost:8501
