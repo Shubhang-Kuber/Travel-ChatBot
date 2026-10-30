@@ -32,3 +32,8 @@ htmlcov/
 *.swp
 .DS_Store
 Thumbs.db
+.env
+
+agent/venv/
+__pycache__/
+*.py[cod]
