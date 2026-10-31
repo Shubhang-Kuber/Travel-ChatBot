@@ -137,6 +137,18 @@ def convert_currency(
     }
 
 
+def _as_items(value: Any) -> list[str]:
+    """Return a list of non-empty strings; a lone string is one item, not characters."""
+
+    if not value:
+        return []
+    if isinstance(value, str):
+        value = [part.lstrip("-*• \t") for part in value.splitlines()]
+    elif not isinstance(value, (list, tuple)):
+        value = [value]
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
 def build_itinerary(structured_plan: dict[str, Any]) -> dict[str, Any]:
     """Normalize a generated itinerary into the backend response shape."""
 
@@ -144,14 +156,16 @@ def build_itinerary(structured_plan: dict[str, Any]) -> dict[str, Any]:
     days = structured_plan.get("days", [])
     lines = [f"Itinerary for {destination}" if destination else "Itinerary"]
 
-    for day in days:
-        day_number = day.get("day", len(lines))
+    for position, day in enumerate(days, start=1):
+        day_number = day.get("day", position)
         title = day.get("title", "")
-        activities = day.get("activities", [])
+        summary = day.get("summary") or day.get("description")
         lines.append(f"\nDay {day_number}: {title}".rstrip())
-        lines.extend(f"- {activity}" for activity in activities)
+        if isinstance(summary, str) and summary.strip():
+            lines.append(summary.strip())
+        lines.extend(f"- {item}" for item in _as_items(day.get("activities")))
 
-    notes = structured_plan.get("notes", [])
+    notes = _as_items(structured_plan.get("notes"))
     if notes:
         lines.append("\nNotes")
         lines.extend(f"- {note}" for note in notes)
