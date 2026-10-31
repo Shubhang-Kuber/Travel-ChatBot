@@ -22,10 +22,10 @@ python-jose[cryptography]==3.5.0
 # Used directly; passlib is deliberately NOT used (unmaintained, breaks on bcrypt>=4.1).
 bcrypt==5.0.0
 
-# Agent (agent/graph.py): LangGraph + Gemini.
+# Agent (agent/graph.py): LangGraph + Groq.
 langgraph==1.2.18
 langchain-core==1.7.3
-langchain-google-genai==4.4.2
+langchain-groq==1.1.3
 python-dotenv==1.2.4
 # Retrieval (data/search.py -> preprocessing/topic_tagger.py, blank tokenizer, no model download).
 spacy==3.8.18
@@ -47,9 +47,7 @@ cymem==2.0.16
 distro==1.9.0
 dnspython==2.9.1
 ecdsa==0.19.2
-filetype==1.2.0
-google-auth==2.62.0
-google-genai==2.34.0
+groq==0.37.1
 h11==0.16.0
 httpcore2==2.16.0
 httpcore==1.0.9
@@ -75,7 +73,6 @@ ormsgpack==1.13.0
 packaging==26.3
 preshed==3.0.15
 pyasn1==0.6.5
-pyasn1_modules==0.4.2
 pycparser==3.12
 pydantic_core==2.50.2
 Pygments==2.21.0

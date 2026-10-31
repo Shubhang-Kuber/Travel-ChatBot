@@ -36,7 +36,7 @@ characters` and never turns healthy. Check with `docker compose logs backend`. T
 (step 3) do not need `.env`.
 
 Every other setting in `.env.example` has a working default. While `USE_MOCK_GRAPH=true`,
-`GEMINI_API_KEY` can stay empty. The ones you are most likely to touch:
+`GROQ_API_KEY` can stay empty. The ones you are most likely to touch:
 
 | Variable | Default | Meaning |
 |---|---|---|

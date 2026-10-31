@@ -334,7 +334,7 @@ def create_graph(
         return updates
 
     def grade_node(state: AgentState) -> dict[str, Any]:
-        """Ask Gemini whether the retrieved documents are relevant."""
+        """Ask the LLM whether the retrieved documents are relevant."""
 
         documents = state.get("retrieved_docs", [])
         query = state.get("query", "")
