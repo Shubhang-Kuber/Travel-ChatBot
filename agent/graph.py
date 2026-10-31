@@ -146,7 +146,21 @@ def _as_items(value: Any) -> list[str]:
         value = [part.lstrip("-*• \t") for part in value.splitlines()]
     elif not isinstance(value, (list, tuple)):
         value = [value]
-    return [str(item).strip() for item in value if str(item).strip()]
+    return [text for text in (_item_text(item) for item in value) if text]
+
+
+def _item_text(item: Any) -> str:
+    """Render one activity/note; dicts become 'Name: description', never raw JSON."""
+
+    if isinstance(item, dict):
+        name = str(item.get("name") or item.get("title") or item.get("activity") or "").strip()
+        detail = str(item.get("description") or item.get("details") or "").strip()
+        if name and detail:
+            return f"{name}: {detail}"
+        if name or detail:
+            return name or detail
+        return ", ".join(str(v).strip() for v in item.values() if str(v).strip())
+    return str(item).strip()
 
 
 def build_itinerary(structured_plan: dict[str, Any]) -> dict[str, Any]:
@@ -160,7 +174,7 @@ def build_itinerary(structured_plan: dict[str, Any]) -> dict[str, Any]:
         day_number = day.get("day", position)
         title = day.get("title", "")
         summary = day.get("summary") or day.get("description")
-        lines.append(f"\nDay {day_number}: {title}".rstrip())
+        lines.append(f"\nDay {day_number}: {title}" if title else f"\nDay {day_number}")
         if isinstance(summary, str) and summary.strip():
             lines.append(summary.strip())
         lines.extend(f"- {item}" for item in _as_items(day.get("activities")))
