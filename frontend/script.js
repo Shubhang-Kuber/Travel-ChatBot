@@ -1,6 +1,8 @@
 // Backend is reached through the same origin: nginx proxies /api/* to FastAPI (see nginx.conf.template).
 const API_BASE = '/api';
-const TYPE_DELAY_MS = 15;
+// Shown in turn while the agent works, so the wait reads as progress.
+const PROGRESS_STEPS = ['Understanding your request', 'Searching travel tips', 'Checking the details', 'Writing your answer'];
+const PROGRESS_STEP_MS = 3500;
 
 const STORAGE = {
     access: 'travelbot.access_token',
@@ -180,12 +182,12 @@ function createMessage(sender = 'ai', placeholder = null) {
             idleResolvers = [];
             return;
         }
-        // Long answers would take minutes one char at a time: type faster as the backlog grows.
-        const n = Math.max(1, Math.ceil(queue.length / 60));
+        // One step per frame, proportional to the backlog: a full answer drains in well under a second.
+        const n = Math.max(3, Math.ceil(queue.length / 6));
         textSpan.textContent += queue.slice(0, n);
         queue = queue.slice(n);
         terminalBody.scrollTop = terminalBody.scrollHeight;
-        timer = setTimeout(typeText, TYPE_DELAY_MS);
+        timer = requestAnimationFrame(typeText);
     }
 
     return {
@@ -247,8 +249,14 @@ async function sendMessage(text, displayText = text) {
     if (busy || !text.trim()) return;
     setBusy(true);
     addMessage(displayText, 'user');
-    const reply = createMessage('ai', 'Searching travel tips');
+    const reply = createMessage('ai', PROGRESS_STEPS[0]);
     let received = false;
+    let step = 0;
+    const progress = setInterval(() => {
+        const label = reply.element.querySelector('.thinking');
+        if (!label || step >= PROGRESS_STEPS.length - 1) return;
+        label.textContent = PROGRESS_STEPS[++step];
+    }, PROGRESS_STEP_MS);
     try {
         await streamChat(text, token => {
             received = true;
@@ -258,6 +266,7 @@ async function sendMessage(text, displayText = text) {
     } catch (err) {
         reply.fail(`Error: ${describeError(err)}`);
     } finally {
+        clearInterval(progress);
         await reply.idle();
         setBusy(false);
         if (isLoggedIn()) document.getElementById('chat-input').focus();
@@ -388,19 +397,13 @@ document.getElementById('expand-icon').addEventListener('click', () => {
 
 
 function minimizeForm() {
-    const container = document.querySelector('.container');
-    const formSection = document.getElementById('form-section');
-
-    container.classList.add('chat-mode');
-    formSection.classList.add('minimized');
+    document.getElementById('app').classList.add('chat-mode');
+    document.getElementById('form-section').classList.add('minimized');
 }
 
 function expandForm() {
-    const container = document.querySelector('.container');
-    const formSection = document.getElementById('form-section');
-
-    container.classList.remove('chat-mode');
-    formSection.classList.remove('minimized');
+    document.getElementById('app').classList.remove('chat-mode');
+    document.getElementById('form-section').classList.remove('minimized');
 }
 
 function tripDays(from, to) {
