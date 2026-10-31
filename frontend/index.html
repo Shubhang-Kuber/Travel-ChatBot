@@ -4,62 +4,24 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TravelBot - AI Travel Assistant</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-    <header class="hero-header">
-        <div class="hero-content">
-            <h1 class="hero-title">
-                <span class="hero-text">Travel</span>
-                <span class="hero-text-accent">Bot</span>
-                <span class="hero-cursor">_</span>
-            </h1>
-            <p class="hero-subtitle">Your AI-Powered Travel Companion</p>
-        </div>
-    </header>
-    <div class="container">
-        <!-- Chat Assistant -->
-        <div class="assistant-terminal">
-            <div class="terminal-header">
-                <div class="terminal-dots">
-                    <div class="dot"></div>
-                    <div class="dot"></div>
-                    <div class="dot"></div>
+    <div class="app" id="app">
+        <!-- Sidebar: sign in, then the itinerary planner -->
+        <aside class="form-section" id="form-section">
+            <div class="brand">
+                <span class="brand-logo"><i class="fas fa-plane-departure"></i></span>
+                <div>
+                    <div class="brand-name">Travel<span>Bot</span></div>
+                    <div class="brand-tag">Your AI-powered travel companion</div>
                 </div>
-                <div class="terminal-title">Travel Assistant</div>
-                <div class="terminal-actions" id="terminal-actions" hidden>
-                    <span class="terminal-user" id="terminal-user"></span>
-                    <button type="button" class="terminal-btn" id="new-trip" title="Start a new conversation">
-                        <i class="fas fa-plus"></i> New trip
-                    </button>
-                    <button type="button" class="terminal-btn" id="sign-out" title="Sign out">
-                        <i class="fas fa-sign-out-alt"></i>
-                    </button>
-                </div>
-            </div>
-            <div class="terminal-body" id="terminal-body">
-                <!-- Messages will be added here dynamically -->
-            </div>
-            <form class="chat-input" id="chat-form" autocomplete="off">
-                <span class="chat-prompt">&gt;</span>
-                <input type="text" id="chat-input" class="chat-input-field" maxlength="4000"
-                       placeholder="Sign in to chat" aria-label="Message" disabled>
-                <button type="submit" class="chat-send" id="chat-send" title="Send" disabled>
-                    <i class="fas fa-paper-plane"></i>
+                <button class="minimize-btn" id="minimize-btn" title="Hide panel">
+                    <i class="fas fa-angles-left"></i>
                 </button>
-            </form>
-        </div>
-
-        <!-- Form Section -->
-        <div class="form-section" id="form-section">
-            <button class="minimize-btn" id="minimize-btn" title="Minimize Form">
-                <i class="fas fa-minus"></i>
-            </button>
-
-            <div class="expand-icon" id="expand-icon">
-                <i class="fas fa-edit"></i>
             </div>
 
             <!-- Sign in / sign up (shown until logged in) -->
@@ -96,8 +58,8 @@
             <!-- Itinerary planner (shown once logged in) -->
             <div class="form-content" id="plan-content" hidden>
                 <div class="form-header">
-                    <h1 class="form-title">Plan Your Journey</h1>
-                    <p class="form-subtitle">Create your perfect itinerary with TravelBot's assistance</p>
+                    <h1 class="form-title">Plan your journey</h1>
+                    <p class="form-subtitle">Add your stops and let TravelBot build the itinerary</p>
                 </div>
 
                 <form class="itinerary-form" id="itinerary-form">
@@ -107,7 +69,7 @@
 
                     <button type="button" class="btn btn-secondary add-stop-btn" id="add-stop">
                         <i class="fas fa-plus"></i>
-                        Add Another Stop
+                        Add another stop
                     </button>
 
                     <div class="form-group">
@@ -117,14 +79,47 @@
                     </div>
 
                     <div class="form-actions">
-                        <button type="submit" class="btn btn-primary" id="plan-submit">
+                        <button type="submit" class="btn btn-primary btn-block" id="plan-submit">
                             <i class="fas fa-magic"></i>
-                            Get AI Suggestions
+                            Get AI suggestions
                         </button>
                     </div>
                 </form>
             </div>
-        </div>
+        </aside>
+
+        <!-- Chat -->
+        <main class="assistant-terminal">
+            <div class="terminal-header">
+                <button type="button" class="expand-icon" id="expand-icon" title="Show trip planner">
+                    <i class="fas fa-angles-right"></i>
+                </button>
+                <span class="avatar"><i class="fas fa-robot"></i></span>
+                <div class="terminal-title">
+                    Travel Assistant
+                    <span class="status"><span class="status-dot"></span>Online</span>
+                </div>
+                <div class="terminal-actions" id="terminal-actions" hidden>
+                    <span class="terminal-user" id="terminal-user"></span>
+                    <button type="button" class="terminal-btn" id="new-trip" title="Start a new conversation">
+                        <i class="fas fa-plus"></i> New trip
+                    </button>
+                    <button type="button" class="terminal-btn" id="sign-out" title="Sign out">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="terminal-body" id="terminal-body" aria-live="polite">
+                <!-- Messages will be added here dynamically -->
+            </div>
+            <form class="chat-input" id="chat-form" autocomplete="off">
+                <input type="text" id="chat-input" class="chat-input-field" maxlength="4000"
+                       placeholder="Sign in to chat" aria-label="Message" disabled>
+                <button type="submit" class="chat-send" id="chat-send" title="Send" disabled>
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </form>
+        </main>
     </div>
 
     <script defer src="./script.js"></script>
