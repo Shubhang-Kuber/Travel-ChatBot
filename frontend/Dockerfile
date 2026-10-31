@@ -1,6 +1,12 @@
-# TravelBot UI: static files served by nginx, which also proxies /api/* to the backend.
+# TravelBot UI: built with Vite, then served by nginx, which also proxies /api/* to the backend.
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
 FROM nginx:1.27.5-alpine
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
-COPY index.html styles.css script.js /usr/share/nginx/html/
-COPY fonts /usr/share/nginx/html/fonts
+COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 8501

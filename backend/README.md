@@ -160,7 +160,7 @@ Ollama listens on http://localhost:11434 (and on `http://ollama:11434` from othe
 The image is several GB, so it only starts with `--profile ollama`. Using it is up to the
 graph (Person B's `agent/`). Keep `USE_MOCK_GRAPH=true` until that package exists.
 
-The frontend (once `./frontend` exists) runs with `docker compose --profile frontend up --build`.
+The frontend (React + Vite, see `frontend/README.md`) runs with `docker compose up --build frontend`.
 
 ## 5. Clean reset
 
