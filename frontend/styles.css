@@ -695,3 +695,20 @@ body::before {
     border-left-color: #dc2626;
     color: #991b1b;
 }
+
+/* Markdown in answers */
+.message strong {
+    font-weight: 700;
+    color: var(--primary-color);
+}
+
+.message.user strong {
+    color: inherit;
+}
+
+.message code {
+    background: #e2e8f0;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 0.9em;
+}

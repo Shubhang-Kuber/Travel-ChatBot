@@ -46,6 +46,19 @@ async def test_graph_receives_stripped_message_and_thread(api) -> None:
     ]
 
 
+async def test_locale_and_timezone_reach_the_graph(api) -> None:
+    g = RecordingGraph()
+    api.app.dependency_overrides[get_graph] = lambda: g
+    body = {"message": "Lisbon", "thread_id": "t-2", "locale": "en-IN", "timezone": "Asia/Kolkata"}
+    r = await api.client.post("/chat", json=body)
+    assert r.status_code == 200
+    assert g.calls[0][0] == {
+        "messages": [{"role": "user", "content": "Lisbon"}],
+        "user_locale": "en-IN",
+        "user_timezone": "Asia/Kolkata",
+    }
+
+
 async def test_omitted_thread_id_is_generated_and_continues(api) -> None:
     r1 = await api.chat("first")
     tid = r1.json()["thread_id"]

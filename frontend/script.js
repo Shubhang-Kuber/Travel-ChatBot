@@ -38,24 +38,48 @@ async function toApiError(res) {
         res.headers.get('Retry-After'));
 }
 
+// The browser's language and timezone, so the agent can quote prices and times in local terms.
+function userContext() {
+    const context = {};
+    try {
+        const locale = navigator.language;
+        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        if (/^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8}){0,4}$/.test(locale || '')) context.locale = locale;
+        if (/^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+){0,2}$/.test(timezone || '')) context.timezone = timezone;
+    } catch { /* unknown: the agent falls back to destination currency */ }
+    return context;
+}
+
 // POST /chat/stream: SSE events token / done / error (backend/CONTRACT.md).
 async function streamChat(message, onToken) {
-    const body = { message };
+    const body = { message, ...userContext() };
     const threadId = loadThread();
     if (threadId) body.thread_id = threadId;
 
+    const started = performance.now();
+    console.log('[TravelBot] POST /chat/stream', body);
     const res = await fetch(`${API_BASE}/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
     });
-    if (!res.ok) throw await toApiError(res);
+    console.log(`[TravelBot] response ${res.status} ${res.statusText} after ${Math.round(performance.now() - started)} ms`);
+    if (!res.ok) {
+        const err = await toApiError(res);
+        console.error('[TravelBot] request failed', err.code, err.message);
+        throw err;
+    }
 
     const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
     let buffer = '';
+    let tokens = 0;
+    let answer = '';
     for (;;) {
         const { value, done } = await reader.read();
-        if (done) throw new ApiError('stream_interrupted', 'The connection dropped before the answer finished.');
+        if (done) {
+            console.error('[TravelBot] stream ended without a done event', { tokens });
+            throw new ApiError('stream_interrupted', 'The connection dropped before the answer finished.');
+        }
         buffer += value;
         let sep;
         while ((sep = buffer.indexOf('\n\n')) !== -1) {
@@ -65,11 +89,17 @@ async function streamChat(message, onToken) {
             const dataLine = block.match(/^data: (.*)$/m)?.[1];
             const data = dataLine ? JSON.parse(dataLine) : null;
             if (event === 'token') {
+                if (tokens === 0) console.log(`[TravelBot] first token after ${Math.round(performance.now() - started)} ms`);
+                tokens += 1;
+                answer += data.content;
                 onToken(data.content);
             } else if (event === 'done') {
+                console.log(`[TravelBot] done: ${tokens} tokens, ${answer.length} chars in ${Math.round(performance.now() - started)} ms, thread ${data.thread_id}`);
+                console.log('[TravelBot] answer:\n' + answer);
                 saveThread(data.thread_id);  // continue this conversation next time
                 return;
             } else if (event === 'error') {
+                console.error('[TravelBot] stream error event', data.error);
                 throw new ApiError(data.error.code, data.error.message);
             }
         }
@@ -86,6 +116,27 @@ function describeError(err) {
 }
 
 // ---------------------------------------------------------------- terminal messages
+
+function escapeHtml(text) {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Small markdown subset for agent answers. Text is escaped FIRST, so model output can
+// never inject HTML; only the tags added here are real. Newlines stay as-is (pre-wrap).
+function renderMarkdown(text) {
+    return escapeHtml(text)
+        .split('\n')
+        .map(line => line
+            .replace(/^\s*#{1,6}\s+(.*)$/, '<strong>$1</strong>')   // # Heading -> bold line
+            .replace(/^\s*(-{3,}|\*{3,}|_{3,})\s*$/, '')              // horizontal rule -> blank
+            .replace(/^(\s*)[*+]\s+/, '$1- ')                         // "* item" -> "- item"
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/__(.+?)__/g, '<strong>$1</strong>')
+            .replace(/(^|[^*\w])\*([^*\s][^*]*?)\*(?![*\w])/g, '$1<em>$2</em>')
+            .replace(/`([^`]+)`/g, '<code>$1</code>'))
+        .join('\n');
+}
 
 // AI messages type out with a cursor. Text can keep arriving (streaming) while it types.
 function clearCursors() {
@@ -120,6 +171,7 @@ function createMessage(sender = 'ai', placeholder = null) {
     terminalBody.scrollTop = terminalBody.scrollHeight;
 
     let queue = '';
+    let shown = '';
     let timer = null;
     let idleResolvers = [];
 
@@ -133,8 +185,11 @@ function createMessage(sender = 'ai', placeholder = null) {
         }
         // Speed up with the backlog so long streamed answers don't lag far behind.
         const n = Math.max(1, Math.ceil(queue.length / 20));
-        textSpan.textContent += queue.slice(0, n);
+        shown += queue.slice(0, n);
         queue = queue.slice(n);
+        // AI text is rendered as markdown (bold etc.); anything else stays plain text.
+        if (sender === 'ai') textSpan.innerHTML = renderMarkdown(shown);
+        else textSpan.textContent = shown;
         terminalBody.scrollTop = terminalBody.scrollHeight;
         timer = setTimeout(typeText, 30);
     }

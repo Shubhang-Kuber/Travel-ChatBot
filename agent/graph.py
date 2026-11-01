@@ -28,7 +28,16 @@ GRADE_SNIPPET_CHARS = 300
 GENERATE_PROMPT = """You are a travel planning assistant. Answer using the supplied context.
 Do not invent facts. Mention uncertain or missing information in the Notes.
 
-Write plain text only. Never output JSON, code blocks, or markdown symbols such as #, ** or |.
+Write plain text. You may use **bold** for titles and key facts. Never output JSON,
+code blocks, tables, or other markdown symbols such as # or |.
+
+Money and time:
+- Give every price in the destination's local currency, followed by the approximate
+  amount in the traveller's home currency, e.g. "EUR 25 (about INR 2,300)". Never give
+  prices in USD only, unless USD is the local or the home currency.
+- Infer the home currency from the traveller's locale and timezone when they are given.
+- Give opening hours and times in the destination's local time, and use the
+  traveller's usual date and time format.
 
 For a trip plan use exactly this layout:
 Itinerary for <destination>
@@ -459,9 +468,14 @@ def create_graph(
             else []
         )
 
+        prompt = GENERATE_PROMPT
+        locale, timezone = state.get("user_locale"), state.get("user_timezone")
+        if locale or timezone:
+            prompt += f"\n\nTraveller: locale {locale or 'unknown'}, timezone {timezone or 'unknown'}."
+
         response = model.invoke(
             [
-                SystemMessage(content=GENERATE_PROMPT),
+                SystemMessage(content=prompt),
                 *state["messages"][-6:],
                 HumanMessage(content="Context:\n\n" + _context_text(state, documents)),
             ]

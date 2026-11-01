@@ -27,7 +27,7 @@ _ERRORS = {code: {"model": ErrorResponse} for code in (422, 429)}
 )
 async def chat(body: ChatRequest, graph: TravelGraph = Depends(get_graph)) -> ChatResponse:
     thread_id = body.thread_id or uuid4().hex
-    reply = await run_chat(graph, thread_id, body.message)
+    reply = await run_chat(graph, thread_id, body.message, body.locale, body.timezone)
     return ChatResponse(response=reply, thread_id=thread_id)
 
 
@@ -43,5 +43,5 @@ async def chat_stream(
     settings: Settings = Depends(get_settings),
 ) -> StreamingResponse:
     thread_id = body.thread_id or uuid4().hex
-    events = stream_chat_events(graph, settings.stream_node, thread_id, body.message)
+    events = stream_chat_events(graph, settings.stream_node, thread_id, body.message, body.locale, body.timezone)
     return StreamingResponse(events, media_type=SSE_MEDIA_TYPE, headers=SSE_HEADERS)

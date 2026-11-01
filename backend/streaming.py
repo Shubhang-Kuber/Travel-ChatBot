@@ -41,10 +41,15 @@ def _chunk_text(chunk: Any) -> str:
 
 
 async def stream_chat_events(
-    graph: TravelGraph, stream_node: str, thread_id: str, message: str
+    graph: TravelGraph,
+    stream_node: str,
+    thread_id: str,
+    message: str,
+    locale: str | None = None,
+    timezone: str | None = None,
 ) -> AsyncIterator[str]:
     """Yield ``token``* then ``done``, or ``token``* then ``error`` if the graph fails."""
-    graph_input, config = build_graph_call(thread_id, message)
+    graph_input, config = build_graph_call(thread_id, message, locale, timezone)
     sent = 0
     chunks: Any = None
     try:

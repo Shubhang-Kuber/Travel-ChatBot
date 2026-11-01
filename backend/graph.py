@@ -149,8 +149,15 @@ def load_graph(settings: Settings) -> TravelGraph:
 # --------------------------------------------------------------------------- calling
 
 
-def build_graph_call(thread_id: str, message: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    graph_input = {"messages": [{"role": "user", "content": message}]}
+def build_graph_call(
+    thread_id: str, message: str, locale: str | None = None, timezone: str | None = None
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    graph_input: dict[str, Any] = {"messages": [{"role": "user", "content": message}]}
+    # Only sent when known, so the graph keeps the last values it saw on this thread.
+    if locale:
+        graph_input["user_locale"] = locale
+    if timezone:
+        graph_input["user_timezone"] = timezone
     config = {"configurable": {"thread_id": thread_id}}
     return graph_input, config
 
@@ -176,8 +183,10 @@ def _final_text(result: Any) -> str:
     return content_to_text(content)
 
 
-async def run_chat(graph: TravelGraph, thread_id: str, message: str) -> str:
-    graph_input, config = build_graph_call(thread_id, message)
+async def run_chat(
+    graph: TravelGraph, thread_id: str, message: str, locale: str | None = None, timezone: str | None = None
+) -> str:
+    graph_input, config = build_graph_call(thread_id, message, locale, timezone)
     try:
         result = await run_in_threadpool(graph.invoke, graph_input, config)
         return _final_text(result)

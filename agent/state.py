@@ -22,3 +22,6 @@ class AgentState(TypedDict, total=False):
     to_currency: str | None
     retry_count: int
     retrieval_is_relevant: bool
+    # From the user's browser, so prices and times can be shown in their own terms.
+    user_locale: str | None
+    user_timezone: str | None

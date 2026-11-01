@@ -93,3 +93,26 @@ def test_health_response_valid() -> None:
 def test_health_response_rejects_other_values() -> None:
     with pytest.raises(ValidationError):
         HealthResponse(status="fine")
+
+
+# ------------------------------------------------------------------ locale / timezone
+
+
+@pytest.mark.parametrize("locale", ["en", "en-IN", "pt-BR", "zh-Hant-TW", "es-419"])
+def test_chat_locale_valid(locale: str) -> None:
+    assert ChatRequest.model_validate({"message": "hi", "locale": locale}).locale == locale
+
+
+@pytest.mark.parametrize("locale", ["", "e", "en_IN", "en IN", "<script>", "x" * 36])
+def test_chat_locale_invalid(locale: str) -> None:
+    invalid(ChatRequest, message="hi", locale=locale)
+
+
+@pytest.mark.parametrize("tz", ["UTC", "Asia/Kolkata", "America/Argentina/Buenos_Aires", "Etc/GMT+5"])
+def test_chat_timezone_valid(tz: str) -> None:
+    assert ChatRequest.model_validate({"message": "hi", "timezone": tz}).timezone == tz
+
+
+@pytest.mark.parametrize("tz", ["", "/etc", "Asia//Kolkata", "a b", "Asia/Kolkata\nx", "x" * 65])
+def test_chat_timezone_invalid(tz: str) -> None:
+    invalid(ChatRequest, message="hi", timezone=tz)

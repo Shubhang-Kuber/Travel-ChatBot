@@ -167,6 +167,8 @@ Request:
 |---|---|---|
 | `message` | string | Leading and trailing whitespace is stripped, then it must be 1..4000 chars. |
 | `thread_id` | string, optional | `^[A-Za-z0-9_-]{1,64}$`. Omit it to start a new conversation. |
+| `locale` | string, optional | Browser language (BCP 47, e.g. `en-IN`). Passed to the graph as `user_locale` so prices use the traveller's home currency. |
+| `timezone` | string, optional | IANA timezone (e.g. `Asia/Kolkata`). Passed to the graph as `user_timezone`. |
 
 Unknown fields are rejected with 422 (e.g. a typo `threadid`).
 
