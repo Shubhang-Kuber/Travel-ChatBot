@@ -1,9 +1,8 @@
 # WanderChat local stack. See backend/README.md.
 #
-#   docker compose up --build                     # backend (default)
+#   docker compose up --build                     # backend + frontend (+ ollama via COMPOSE_PROFILES)
 #   docker compose --profile test run --rm test   # test suite
 #   docker compose --profile ollama up -d         # + local LLM (offline mode)
-#   docker compose --profile frontend up --build  # + frontend (once ./frontend exists)
 #   docker compose down -v                        # stop and DELETE all data volumes
 #
 # No secrets live in this file. API keys come from .env (gitignored; copy .env.example).

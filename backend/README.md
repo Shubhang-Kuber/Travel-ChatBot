@@ -120,11 +120,7 @@ The production image (`target: runtime`) contains no pytest, dev dependencies or
 
 ## 4. Frontend
 
-```powershell
-docker compose --profile frontend up --build
-```
-
-Open http://localhost:8501.
+`docker compose up --build` also starts the frontend at http://localhost:8501.
 
 ## Troubleshooting
 

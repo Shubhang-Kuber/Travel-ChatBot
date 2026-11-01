@@ -43,3 +43,6 @@ mongo/mongo_data/
 *.arrow
 travel_posts.jsonl
 preprocessing/admin1CodesASCII.txt
+
+# Local Claude Code config
+.claude/

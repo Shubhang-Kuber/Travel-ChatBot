@@ -1,45 +1,71 @@
-## Person A — Data & Retrieval (MongoDB + RAG core)
- 
-**Responsibilities:**
-- Dataset acquisition, cleaning, schema design
-- Embedding pipeline, vector index setup
-**Owns:**
-- `search_stored_tips()` function and everything behind it
-- MongoDB Atlas schema for the travel tips (`posts` + `chunks`)
-**Deliverable others depend on:**
-- A working, tested `search_stored_tips(query, destination)` function with a stable signature
----
- 
-## Person B — Agent & LLM (LangGraph + tool orchestration)
- 
-**Responsibilities:**
-- LangGraph state machine: plan / retrieve / grade / generate nodes
-- Grade/retry loop logic
-- Gemini + Ollama integration and the backend-switch env var
-**Owns:**
-- All other tool functions — `get_weather()`, `convert_currency()`, `live_search()`, `build_itinerary()`
-**Depends on:**
-- Person A's `search_stored_tips()` signature (agree on it in week 1, then build against a stub/mock until it's ready)
----
- 
-## Person C — Backend & Infra (FastAPI + Docker + deployment)
- 
-**Responsibilities:**
-- FastAPI routes, request/response models, CORS
-- Rate limiting (per client IP; no login), load balancing config
-- Docker Compose, Dockerfiles for each service, `.env` handling
-**Owns:**
-- The `/chat` and `/chat/stream` endpoints that wrap Person B's graph
-**Depends on:**
-- Person B exposing the graph as an importable `graph.invoke()` call (agree on that interface early too)
----
- 
-## How We Avoid Conflict
- 
-- **Week 1:** all three agree together on the three interface contracts before anyone writes implementation code:
-  1. `search_stored_tips()` signature
-  2. `graph.invoke()` input/output shape
-  3. `/chat` request/response JSON schema
-- Each person works in their own module/folder (`data/`, `agent/`, `backend/`) — no two people editing the same file.
-- Integration points are tested with mocks/stubs first (e.g. Person C can build the FastAPI route against a fake `graph.invoke()` returning dummy JSON, without waiting for Person B to finish).
-- **Frontend** is picked up by whoever finishes their core piece first — it only needs the `/chat` endpoint contract, nothing else.
+# TravelBot
+
+An AI travel assistant. Add your stops and dates, and it plans a day-by-day itinerary.
+Then keep chatting: ask about food, transport, budget or weather. There's no login: open
+the page and start asking.
+
+Answers stream in live. Prices come in the destination's currency plus your home
+currency, and times are given in local time.
+
+## How it works
+
+```
+Browser ──► FastAPI backend ──► LangGraph agent ──► MongoDB Atlas (travel tips)
+   ▲               │                   │
+   └── streamed ◄──┘                   └──► live tools: web search, weather, currency
+       answer
+```
+
+### The agent (LangGraph + Groq)
+
+Each question goes through a small graph of steps. The model is `openai/gpt-oss-120b` on Groq.
+
+1. **plan**: works out what you're asking, the destination, and whether live data is needed.
+2. **retrieve**: searches the stored travel tips in MongoDB Atlas.
+3. **grade**: checks whether the tips actually answer the question.
+   - If they don't, **rewrite** the search query and try again (up to 2 times).
+   - If they still don't, or you asked something current, run a **web search** (Tavily)
+     plus **weather** (Open-Meteo) or **currency** (Frankfurter) when relevant.
+4. **generate**: writes the answer from that context. Its tokens are streamed to the browser.
+
+Conversation history is kept per chat thread, so follow-up questions have context.
+
+### The RAG approach (MongoDB Atlas)
+
+The knowledge base is about 10,000 Reddit travel posts, including their comments, where
+most of the real advice is.
+
+- **Tagging**: each post is tagged with real destinations (spaCy + a local LLM) and with topics
+  (food, transport, budget, ...).
+- **Chunking**: posts are split into post, summary and comment chunks, so one good comment can be
+  found on its own. Each chunk keeps the post title and tags for context.
+- **Embedding**: chunks are embedded with `nomic-embed-text` (Ollama) and stored in Atlas as
+  compact float32 vectors.
+- **Hybrid search**: at question time, Atlas **Vector Search** (meaning) and Atlas **Search**
+  (keywords) run together, filtered by destination. The two result lists are merged with
+  reciprocal rank fusion and grouped by post.
+
+## Project layout
+
+| Folder | What's in it |
+|---|---|
+| `frontend/` | Static web UI (HTML/CSS/JS), served by nginx, which also proxies `/api` to the backend |
+| `backend/` | FastAPI app: `/chat`, `/chat/stream` (Server-Sent Events), `/health`, per-IP rate limit |
+| `agent/` | LangGraph agent and tools |
+| `data/` | Hybrid search over Atlas (`search_stored_tips`) |
+| `preprocessing/` | Data pipeline: tag, chunk and embed the Reddit posts |
+| `mongo/` | Loads the processed data and search indexes into Atlas |
+
+## Run it
+
+You need Docker, a Groq API key and a MongoDB Atlas connection string.
+
+```bash
+cp .env.example .env        # fill in GROQ_API_KEY and MONGODB_URI
+docker compose up --build
+```
+
+This starts the backend, the frontend and Ollama (for query embeddings). Open http://localhost:8501.
+
+API details: [`backend/CONTRACT.md`](backend/CONTRACT.md). More on running and tests:
+[`backend/README.md`](backend/README.md).
