@@ -1,48 +1,30 @@
 // Backend is reached through the same origin: nginx proxies /api/* to FastAPI (see nginx.conf.template).
 const API_BASE = '/api';
+const THREAD_KEY = 'travelbot.thread_id';
 // Shown in turn while the agent works, so the wait reads as progress.
 const PROGRESS_STEPS = ['Understanding your request', 'Searching travel tips', 'Checking the details', 'Writing your answer'];
 const PROGRESS_STEP_MS = 3500;
 
-const STORAGE = {
-    access: 'travelbot.access_token',
-    refresh: 'travelbot.refresh_token',
-    email: 'travelbot.email',
-    thread: 'travelbot.thread_id',
-};
-
-let authMode = 'login';
 let busy = false;
 
 // ---------------------------------------------------------------- storage
 
-function load(key) {
-    try { return localStorage.getItem(key); } catch { return null; }
+function loadThread() {
+    try { return localStorage.getItem(THREAD_KEY); } catch { return null; }
 }
 
-function store(key, value) {
+function saveThread(value) {
     try {
-        if (value == null) localStorage.removeItem(key);
-        else localStorage.setItem(key, value);
-    } catch { /* private mode: session lasts until reload */ }
-}
-
-function saveTokens(tokens) {
-    // Refresh token first: it is single use, so it must be kept before the access token is used.
-    store(STORAGE.refresh, tokens.refresh_token);
-    store(STORAGE.access, tokens.access_token);
-}
-
-function isLoggedIn() {
-    return Boolean(load(STORAGE.refresh));
+        if (value == null) localStorage.removeItem(THREAD_KEY);
+        else localStorage.setItem(THREAD_KEY, value);
+    } catch { /* private mode: lasts until reload */ }
 }
 
 // ---------------------------------------------------------------- API
 
 class ApiError extends Error {
-    constructor(status, code, message, retryAfter = null) {
+    constructor(code, message, retryAfter = null) {
         super(message);
-        this.status = status;
         this.code = code;
         this.retryAfter = retryAfter;
     }
@@ -52,62 +34,28 @@ async function toApiError(res) {
     let body = null;
     try { body = await res.json(); } catch { /* not JSON */ }
     const err = (body && body.error) || {};
-    return new ApiError(res.status, err.code || `http_${res.status}`,
-        err.message || res.statusText || 'Request failed.', res.headers.get('Retry-After'));
-}
-
-function postJson(path, body, accessToken = null) {
-    const headers = { 'Content-Type': 'application/json' };
-    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-    return fetch(`${API_BASE}${path}`, { method: 'POST', headers, body: JSON.stringify(body) });
-}
-
-// Single-flight: two parallel refreshes with the same token count as a replay and log the user out.
-let refreshing = null;
-function refreshTokens() {
-    if (!refreshing) {
-        refreshing = (async () => {
-            const token = load(STORAGE.refresh);
-            if (!token) throw new ApiError(401, 'invalid_token', 'Session expired.');
-            const res = await postJson('/auth/refresh', { refresh_token: token });
-            if (!res.ok) throw await toApiError(res);
-            saveTokens(await res.json());
-        })().finally(() => { refreshing = null; });
-    }
-    return refreshing;
-}
-
-async function authedPost(path, body) {
-    let res = await postJson(path, body, load(STORAGE.access));
-    if (res.status === 401) {
-        try {
-            await refreshTokens();
-        } catch (err) {
-            signOut('Your session expired. Please sign in again.');
-            throw err;
-        }
-        res = await postJson(path, body, load(STORAGE.access));
-    }
-    if (!res.ok) {
-        const err = await toApiError(res);
-        if (res.status === 401) signOut('Your session expired. Please sign in again.');
-        throw err;
-    }
-    return res;
+    return new ApiError(err.code || `http_${res.status}`, err.message || res.statusText || 'Request failed.',
+        res.headers.get('Retry-After'));
 }
 
 // POST /chat/stream: SSE events token / done / error (backend/CONTRACT.md).
 async function streamChat(message, onToken) {
     const body = { message };
-    const threadId = load(STORAGE.thread);
+    const threadId = loadThread();
     if (threadId) body.thread_id = threadId;
 
-    const res = await authedPost('/chat/stream', body);
+    const res = await fetch(`${API_BASE}/chat/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) throw await toApiError(res);
+
     const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
     let buffer = '';
     for (;;) {
         const { value, done } = await reader.read();
-        if (done) throw new ApiError(0, 'stream_interrupted', 'The connection dropped before the answer finished.');
+        if (done) throw new ApiError('stream_interrupted', 'The connection dropped before the answer finished.');
         buffer += value;
         let sep;
         while ((sep = buffer.indexOf('\n\n')) !== -1) {
@@ -119,10 +67,10 @@ async function streamChat(message, onToken) {
             if (event === 'token') {
                 onToken(data.content);
             } else if (event === 'done') {
-                store(STORAGE.thread, data.thread_id);  // continue this conversation next turn
+                saveThread(data.thread_id);  // continue this conversation next time
                 return;
             } else if (event === 'error') {
-                throw new ApiError(200, data.error.code, data.error.message);
+                throw new ApiError(data.error.code, data.error.message);
             }
         }
     }
@@ -130,10 +78,8 @@ async function streamChat(message, onToken) {
 
 function describeError(err) {
     if (err instanceof ApiError) {
-        if (err.code === 'rate_limited') {
-            return `Too many requests. Try again in ${err.retryAfter || 'a few'} seconds.`;
-        }
-        if (err.code === 'validation_error') return 'Please check the details you entered.';
+        if (err.code === 'rate_limited') return `Too many requests. Try again in ${err.retryAfter || 'a few'} seconds.`;
+        if (err.code === 'validation_error') return 'Please check your message and try again.';
         return err.message;
     }
     return 'Could not reach the TravelBot server. Is the backend running?';
@@ -141,13 +87,15 @@ function describeError(err) {
 
 // ---------------------------------------------------------------- terminal messages
 
+// AI messages type out with a cursor. Text can keep arriving (streaming) while it types.
 function clearCursors() {
     document.querySelectorAll('#terminal-body .cursor').forEach(cursor => cursor.remove());
 }
 
-// AI messages type out with a cursor; text can keep arriving (streaming) while it types.
 function createMessage(sender = 'ai', placeholder = null) {
     const terminalBody = document.getElementById('terminal-body');
+
+    // Remove cursor from previous message
     clearCursors();
 
     const messageDiv = document.createElement('div');
@@ -180,14 +128,15 @@ function createMessage(sender = 'ai', placeholder = null) {
             timer = null;
             idleResolvers.forEach(resolve => resolve());
             idleResolvers = [];
+            terminalBody.scrollTop = terminalBody.scrollHeight;
             return;
         }
-        // One step per frame, proportional to the backlog: a full answer drains in well under a second.
-        const n = Math.max(3, Math.ceil(queue.length / 6));
+        // Speed up with the backlog so long streamed answers don't lag far behind.
+        const n = Math.max(1, Math.ceil(queue.length / 20));
         textSpan.textContent += queue.slice(0, n);
         queue = queue.slice(n);
         terminalBody.scrollTop = terminalBody.scrollHeight;
-        timer = requestAnimationFrame(typeText);
+        timer = setTimeout(typeText, 30);
     }
 
     return {
@@ -217,6 +166,7 @@ function createMessage(sender = 'ai', placeholder = null) {
 
 function addMessage(text, sender = 'ai') {
     if (sender === 'user') {
+        // User messages appear at once, without typing.
         clearCursors();
         const terminalBody = document.getElementById('terminal-body');
         const messageDiv = document.createElement('div');
@@ -235,13 +185,26 @@ function clearTerminal() {
     document.getElementById('terminal-body').replaceChildren();
 }
 
-// ---------------------------------------------------------------- chat
+// ---------------------------------------------------------------- itinerary -> chat
+
+function tripDays(from, to) {
+    return Math.round((new Date(to) - new Date(from)) / 86400000) + 1;
+}
+
+function itineraryMessage(stops, notes) {
+    const lines = stops.map((stop, i) => {
+        const days = tripDays(stop.from, stop.to);
+        return `${i + 1}. ${stop.destination}: ${stop.from} to ${stop.to} (${days} day${days === 1 ? '' : 's'})`;
+    });
+    let message = `Plan an itinerary for my trip:\n${lines.join('\n')}`;
+    if (notes) message += `\nNotes: ${notes}`;
+    return message;
+}
 
 function setBusy(value) {
     busy = value;
-    const loggedIn = isLoggedIn();
-    document.getElementById('chat-input').disabled = value || !loggedIn;
-    document.getElementById('chat-send').disabled = value || !loggedIn;
+    document.getElementById('chat-input').disabled = value;
+    document.getElementById('chat-send').disabled = value;
     document.getElementById('plan-submit').disabled = value;
 }
 
@@ -269,7 +232,7 @@ async function sendMessage(text, displayText = text) {
         clearInterval(progress);
         await reply.idle();
         setBusy(false);
-        if (isLoggedIn()) document.getElementById('chat-input').focus();
+        document.getElementById('chat-input').focus();
     }
 }
 
@@ -282,104 +245,20 @@ document.getElementById('chat-form').addEventListener('submit', event => {
     sendMessage(text);
 });
 
-// ---------------------------------------------------------------- auth
-
-function setAuthMode(mode) {
-    authMode = mode;
-    document.querySelectorAll('.auth-tab').forEach(tab => {
-        tab.classList.toggle('active', tab.dataset.mode === mode);
-    });
-    const password = document.getElementById('auth-password');
-    password.autocomplete = mode === 'signup' ? 'new-password' : 'current-password';
-    if (mode === 'signup') password.minLength = 8;
-    else password.removeAttribute('minlength');
-    document.getElementById('auth-submit-label').textContent = mode === 'signup' ? 'Create account' : 'Sign in';
-    showAuthError(null);
-}
-
-function showAuthError(text) {
-    const el = document.getElementById('auth-error');
-    el.textContent = text || '';
-    el.hidden = !text;
-}
-
-async function login(email, password) {
-    const res = await postJson('/auth/login', { email, password });
-    if (!res.ok) throw await toApiError(res);
-    saveTokens(await res.json());
-    store(STORAGE.email, email.trim().toLowerCase());
-}
-
-document.querySelectorAll('.auth-tab').forEach(tab => {
-    tab.addEventListener('click', () => setAuthMode(tab.dataset.mode));
-});
-
-document.getElementById('auth-form').addEventListener('submit', async event => {
-    event.preventDefault();
-    const email = document.getElementById('auth-email').value;
-    const password = document.getElementById('auth-password').value;
-    const submit = document.getElementById('auth-submit');
-    submit.disabled = true;
-    showAuthError(null);
-    try {
-        if (authMode === 'signup') {
-            const res = await postJson('/auth/signup', { email, password });
-            if (!res.ok) throw await toApiError(res);
-        }
-        await login(email, password);
-        document.getElementById('auth-password').value = '';
-        renderSession(true);
-    } catch (err) {
-        if (err.code === 'email_taken') showAuthError('That email is already registered. Sign in instead.');
-        else if (err.code === 'invalid_credentials') showAuthError('Wrong email or password.');
-        else if (err.code === 'validation_error' && authMode === 'signup') {
-            showAuthError('Use a valid email and a password of 8 to 72 characters.');
-        } else showAuthError(describeError(err));
-    } finally {
-        submit.disabled = false;
-    }
-});
-
-function signOut(notice = null) {
-    const refresh = load(STORAGE.refresh);
-    if (refresh) postJson('/auth/logout', { refresh_token: refresh }).catch(() => {});
-    Object.values(STORAGE).forEach(key => store(key, null));
-    renderSession(false, notice);
-}
-
-document.getElementById('sign-out').addEventListener('click', () => signOut());
-
 document.getElementById('new-trip').addEventListener('click', () => {
     if (busy) return;
-    store(STORAGE.thread, null);
+    saveThread(null);
     clearTerminal();
     addMessage('New trip started.\nPlease enter your travel itinerary ✈️ or ask me anything below.', 'ai');
     expandForm();
 });
 
-function renderSession(loggedIn, notice = null) {
-    document.getElementById('auth-content').hidden = loggedIn;
-    document.getElementById('plan-content').hidden = !loggedIn;
-    document.getElementById('terminal-actions').hidden = !loggedIn;
-    const email = load(STORAGE.email) || '';
-    document.getElementById('terminal-user').textContent = email;
-    document.getElementById('chat-input').placeholder = loggedIn
-        ? 'Ask anything, e.g. what about food?'
-        : 'Sign in to chat';
-    setBusy(false);
+// Initialize with welcome message and cursor
+const resumed = loadThread() ? '\n(Continuing your last trip conversation. Click "New trip" to start over.)' : '';
+addMessage(`Welcome, traveller\nPlease enter your travel itinerary ✈️ or ask me anything below.${resumed}`, 'ai');
 
-    clearTerminal();
-    if (loggedIn) {
-        const name = email.split('@')[0] || 'USER';
-        const resumed = load(STORAGE.thread) ? '\n(Continuing your last trip conversation. Click "New trip" to start over.)' : '';
-        addMessage(`Welcome, ${name}\nPlease enter your travel itinerary ✈️ or ask me anything below.${resumed}`, 'ai');
-    } else {
-        expandForm();
-        addMessage(notice || 'Welcome, traveller\nSign in or create an account to start planning ✈️', 'ai');
-    }
-}
-
-// ---------------------------------------------------------------- itinerary form
+// Initialize with first stop
+addStopRow();
 
 // Add stop button event
 document.getElementById('add-stop').addEventListener('click', () => {
@@ -397,27 +276,19 @@ document.getElementById('expand-icon').addEventListener('click', () => {
 
 
 function minimizeForm() {
-    document.getElementById('app').classList.add('chat-mode');
-    document.getElementById('form-section').classList.add('minimized');
+    const container = document.querySelector('.container');
+    const formSection = document.getElementById('form-section');
+
+    container.classList.add('chat-mode');
+    formSection.classList.add('minimized');
 }
 
 function expandForm() {
-    document.getElementById('app').classList.remove('chat-mode');
-    document.getElementById('form-section').classList.remove('minimized');
-}
+    const container = document.querySelector('.container');
+    const formSection = document.getElementById('form-section');
 
-function tripDays(from, to) {
-    return Math.round((new Date(to) - new Date(from)) / 86400000) + 1;
-}
-
-function itineraryMessage(stops, notes) {
-    const lines = stops.map((stop, i) => {
-        const days = tripDays(stop.from, stop.to);
-        return `${i + 1}. ${stop.destination}: ${stop.from} to ${stop.to} (${days} day${days === 1 ? '' : 's'})`;
-    });
-    let message = `Plan an itinerary for my trip:\n${lines.join('\n')}`;
-    if (notes) message += `\nNotes: ${notes}`;
-    return message;
+    container.classList.remove('chat-mode');
+    formSection.classList.remove('minimized');
 }
 
 // Form submit event
@@ -531,10 +402,3 @@ function updateStopNumbers() {
         numberDiv.textContent = index + 1;
     });
 }
-
-// ---------------------------------------------------------------- start
-
-// Initialize with first stop
-addStopRow();
-setAuthMode('login');
-renderSession(isLoggedIn());

@@ -5,7 +5,7 @@
 - Embedding pipeline, vector index setup
 **Owns:**
 - `search_stored_tips()` function and everything behind it
-- MongoDB schema for both `travel_tips` and `users` collections
+- MongoDB Atlas schema for the travel tips (`posts` + `chunks`)
 **Deliverable others depend on:**
 - A working, tested `search_stored_tips(query, destination)` function with a stable signature
 ---
@@ -22,15 +22,14 @@
 - Person A's `search_stored_tips()` signature (agree on it in week 1, then build against a stub/mock until it's ready)
 ---
  
-## Person C — Backend, Auth & Infra (FastAPI + Docker + deployment)
+## Person C — Backend & Infra (FastAPI + Docker + deployment)
  
 **Responsibilities:**
 - FastAPI routes, request/response models, CORS
-- Auth: signup/login, JWT issuance, bcrypt hashing, gateway-level token validation
-- Rate limiting, load balancing config
+- Rate limiting (per client IP; no login), load balancing config
 - Docker Compose, Dockerfiles for each service, `.env` handling
 **Owns:**
-- The `/chat` and `/auth` endpoints that wrap Person B's graph
+- The `/chat` and `/chat/stream` endpoints that wrap Person B's graph
 **Depends on:**
 - Person B exposing the graph as an importable `graph.invoke()` call (agree on that interface early too)
 ---

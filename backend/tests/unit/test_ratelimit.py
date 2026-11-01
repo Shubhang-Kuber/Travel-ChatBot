@@ -103,18 +103,18 @@ def test_many_keys_still_correct_across_sweeps() -> None:
 
 def limited_app(clock: FakeClock, limit: str = "2/60") -> FastAPI:
     app = FastAPI()
-    app.state.settings = make_settings(limits={"login": limit})
+    app.state.settings = make_settings(limits={"chat": limit})
     app.state.rate_limiter = RateLimiter(clock=clock)
     install_exception_handlers(app)
 
     def header_key(request: Request) -> str:
         return request.headers.get("x-key", "anon")
 
-    @app.post("/by-ip", dependencies=[Depends(rate_limit("login", client_ip))])
+    @app.post("/by-ip", dependencies=[Depends(rate_limit("chat", client_ip))])
     async def by_ip() -> dict:
         return {"ok": True}
 
-    @app.post("/by-key", dependencies=[Depends(rate_limit("login", header_key))])
+    @app.post("/by-key", dependencies=[Depends(rate_limit("chat", header_key))])
     async def by_key() -> dict:
         return {"ok": True}
 

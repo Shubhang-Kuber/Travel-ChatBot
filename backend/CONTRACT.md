@@ -4,8 +4,8 @@ Two contracts live here:
 
 1. **Graph contract** (backend and Person B's LangGraph agent): what the backend sends
    to the graph, what it expects back, and how it calls it.
-2. **HTTP contract** (backend and the frontend): request/response shapes, auth header,
-   and the error envelope.
+2. **HTTP contract** (backend and the frontend): request/response shapes and the
+   error envelope. There is no login: every endpoint is public.
 
 The adapter that implements the backend side of (1) is `backend/graph.py`.
 
@@ -43,29 +43,22 @@ dependency *inside* your module, that original `ModuleNotFoundError` is raised a
 ```python
 graph.invoke(
     {"messages": [{"role": "user", "content": "<the user's message, stripped, 1..4000 chars>"}]},
-    config={"configurable": {"thread_id": "<user_id>:<client_thread_id>"}},
+    config={"configurable": {"thread_id": "<client_thread_id>"}},
 )
 ```
 
 - Exactly **one** new user message per call. Earlier turns are **not** re-sent. The graph's
-  checkpointer must keep history per `thread_id` (as `add_messages` + `MemorySaver` /
-  `MongoDBSaver` do).
+  checkpointer must keep history per `thread_id` (as `add_messages` + `InMemorySaver` does).
 - The state key is `messages`. Messages arrive as role/content dicts, which LangGraph's
   `add_messages` converts to `HumanMessage`.
 
-### thread_id namespacing (security)
+### thread_id
 
-- The graph thread id is always `f"{user_id}:{thread_id}"`, where `user_id` comes from
-  the verified access token and `thread_id` comes from the client (or is a server-generated
-  `uuid4().hex`).
-- This stops user B from reading user A's conversation memory by guessing a thread id.
-  **Treat the configurable `thread_id` as opaque.** Do not parse it, and do not key
-  memory on anything else.
-- Client thread ids match `^[A-Za-z0-9_-]{1,64}$`, so they never contain `:`.
-  Everything after the last `:` is the client's id, which helps when debugging.
-- If you persist checkpoints in MongoDB, it must use the **same** `MONGO_URI`/database
-  (one instance, one DB). Talk to the backend lead before adding any collection. Today
-  the agreed collections are only `travel_tips` and `users`.
+- The graph thread id is the client's `thread_id`, or a server-generated `uuid4().hex`
+  when the client omits it. **Treat it as opaque.**
+- Client thread ids match `^[A-Za-z0-9_-]{1,64}$`.
+- There are no accounts, so anyone holding a thread id can continue that conversation.
+  Server-generated ids are random 128-bit values. History lives in memory and is lost on restart.
 
 ### Output (what we read)
 
@@ -159,17 +152,10 @@ Base URL (local): `http://localhost:8000`. All request and response bodies are J
 Every endpoint that takes input takes a **JSON body**. Query parameters are never read.
 
 CORS: origins from `CORS_ORIGINS` (default `http://localhost:8501,http://localhost:3000`).
-Allowed methods are `GET, POST, OPTIONS`. Allowed request headers are `Authorization` and
-`Content-Type`. `Retry-After` is exposed to scripts. No cookies are used
+Allowed methods are `GET, POST, OPTIONS`. The allowed request header is `Content-Type`. `Retry-After` is exposed to scripts. No cookies are used
 (`allow_credentials=false`).
 
-### Authentication
-
-Protected endpoints require `Authorization: Bearer <access_token>`. Tokens are never
-sent in URLs. Access tokens come from `/auth/login` and `/auth/refresh` (see below).
-They are validated locally (signature, expiry, type), with no database lookup.
-
-### `POST /chat` (protected)
+### `POST /chat`
 
 Request:
 
@@ -192,20 +178,16 @@ Response `200`:
 
 - `thread_id` is the client's id, echoed as sent. If it was omitted, the server generates
   one (32 hex chars). **Send it back on the next turn** to continue the conversation.
-- Thread ids are private to each user. Two users using the same `thread_id` get separate
-  conversations.
 
-Errors: `401` (missing, invalid or expired token), `422` (bad body), `429` (more than
-`RATE_LIMIT_CHAT` requests per user, default 30 per 60 s, with a `Retry-After` header), and
-`502` `upstream_error` (the agent failed). `/chat` and `/chat/stream` share **one**
-per-user `chat` budget. A request rejected with 401 is not counted, because the limit
-is keyed by the authenticated user.
+Errors: `422` (bad body), `429` (more than `RATE_LIMIT_CHAT` requests per client IP,
+default 30 per 60 s, with a `Retry-After` header), and `502` `upstream_error` (the agent
+failed). `/chat` and `/chat/stream` share **one** per-IP `chat` budget.
 
 Example:
 
 ```bash
 curl -X POST http://localhost:8000/chat \
-  -H "Authorization: Bearer $ACCESS_TOKEN" -H "Content-Type: application/json" \
+  -H "Content-Type: application/json" \
   -d '{"message": "Plan 3 days in Lisbon", "thread_id": "trip-1"}'
 ```
 
@@ -213,17 +195,16 @@ PowerShell:
 
 ```powershell
 Invoke-RestMethod -Method Post http://localhost:8000/chat `
-  -Headers @{ Authorization = "Bearer $env:ACCESS_TOKEN" } -ContentType "application/json" `
+  -ContentType "application/json" `
   -Body '{"message": "Plan 3 days in Lisbon", "thread_id": "trip-1"}'
 ```
 
-### `POST /chat/stream` (protected, Server-Sent Events)
+### `POST /chat/stream` (Server-Sent Events)
 
 This is the same conversation as `/chat`, but the reply arrives token by token. It uses the
-same request body (`ChatRequest`), the same `Authorization: Bearer` header and the
-same per-user `chat` rate limit (shared with `/chat`). It is **POST** because the token
-must never go in a URL, so browser `EventSource` (GET-only, no headers) cannot be used.
-Use `fetch` and read the body stream (example below).
+same request body (`ChatRequest`) and the same per-IP `chat` rate limit (shared with
+`/chat`). It is **POST** because it takes a JSON body, so browser `EventSource` (GET-only)
+cannot be used. Use `fetch` and read the body stream (example below).
 
 Request: identical to `/chat`:
 
@@ -232,7 +213,7 @@ Request: identical to `/chat`:
 ```
 
 **Before the stream starts**, failures are ordinary JSON error envelopes with their normal
-status: `401`, `422` and `429` (with `Retry-After`). Check `response.ok` and the
+status: `422` and `429` (with `Retry-After`). Check `response.ok` and the
 `Content-Type` before reading events.
 
 **Success**: `200`. The response headers are:
@@ -283,13 +264,13 @@ the agent. The token that is in flight is discarded.
 JavaScript (browser or Node 18+):
 
 ```js
-async function streamChat(accessToken, message, threadId, onToken) {
+async function streamChat(message, threadId, onToken) {
   const res = await fetch("http://localhost:8000/chat/stream", {
     method: "POST",
-    headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(threadId ? { message, thread_id: threadId } : { message }),
   });
-  if (!res.ok) throw (await res.json()).error;          // 401 / 422 / 429 envelope
+  if (!res.ok) throw (await res.json()).error;          // 422 / 429 envelope
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let buf = "";
   for (;;) {
@@ -314,14 +295,14 @@ PowerShell 5.1 strips the inner double quotes from JSON passed to native program
 
 ```powershell
 '{"message": "Plan 3 days in Lisbon", "thread_id": "trip-1"}' | Set-Content -Encoding ascii body.json
-curl.exe -N http://localhost:8000/chat/stream -H "Authorization: Bearer $env:ACCESS_TOKEN" `
+curl.exe -N http://localhost:8000/chat/stream `
   -H "Content-Type: application/json" --data-binary "@body.json"
 ```
 
 bash:
 
 ```bash
-curl -N http://localhost:8000/chat/stream -H "Authorization: Bearer $ACCESS_TOKEN" \
+curl -N http://localhost:8000/chat/stream \
   -H "Content-Type: application/json" -d '{"message": "Plan 3 days in Lisbon", "thread_id": "trip-1"}'
 ```
 
@@ -334,16 +315,11 @@ same request made from a container (directly, or through `host.docker.internal`)
 shows no such delay. This comes from the host port forwarding, not from the API. Measure
 first-token time from inside the compose network.
 
-### `GET /health` (public)
+### `GET /health`
 
-- `200` → `{"status": "ok", "mongo": "up"}`
-- `503` → `{"status": "degraded", "mongo": "down"}` (the MongoDB ping failed or took more
-  than about 2 s)
+- `200` → `{"status": "ok"}` while the process is up.
 
-This endpoint is deliberately **not** wrapped in the error envelope. It is a status report
-for probes such as the compose healthcheck.
-
-### Error envelope (every other non-2xx response)
+### Error envelope (every non-2xx response)
 
 ```json
 {
@@ -359,16 +335,12 @@ for probes such as the compose healthcheck.
 
 - `details` is a list only for `validation_error`. Otherwise it is `null`. Validation
   details **never echo input values**.
-- `401` responses carry `WWW-Authenticate: Bearer`. `429` responses carry `Retry-After: <seconds>`.
+- `429` responses carry `Retry-After: <seconds>`.
 
 | HTTP | `code` | When |
 |---|---|---|
-| 401 | `not_authenticated` | No bearer token. |
-| 401 | `invalid_token` | Token is malformed, has a bad signature, is expired or is the wrong type. |
-| 401 | `invalid_credentials` | Login with a wrong email or password (same body for both). |
 | 404 | `not_found` | Unknown path. |
 | 405 | `method_not_allowed` | Wrong method (with an `Allow` header). |
-| 409 | `email_taken` | Signup with an email that is already registered. |
 | 422 | `validation_error` | Body is missing, malformed, has unknown fields or breaks a constraint. |
 | 429 | `rate_limited` | Rate limit exceeded. |
 | 500 | `internal_error` | Unexpected server error. The message is generic and the details are logged server-side. |
@@ -376,176 +348,3 @@ for probes such as the compose healthcheck.
 
 Frontend guidance: switch on `error.code`, not on `message`. Messages are for humans and
 may change.
-
----
-
-## Auth endpoints
-
-All four endpoints take a JSON body. Unknown fields get a 422. Tokens go only in JSON bodies
-and in the `Authorization: Bearer` header, **never in URLs or query strings**. The server
-ignores query parameters.
-
-### Tokens
-
-| Token | Lifetime | Use |
-|---|---|---|
-| access token | 15 min (`ACCESS_TOKEN_TTL_MINUTES`) | `Authorization: Bearer <access_token>` on protected endpoints (`/chat`). Checked locally (signature, expiry and type). |
-| refresh token | 7 days (`REFRESH_TOKEN_TTL_DAYS`) | Only as the body of `/auth/refresh` and `/auth/logout`. **Single use**: every refresh returns a new one. |
-
-Both are HS256 JWTs. Treat them as opaque strings: do not parse them client-side.
-`expires_in` tells you when the access token expires. A user has at most **5** live
-refresh sessions (devices or logins). A 6th login evicts the oldest.
-
-Email addresses are trimmed and lowercased, so `" Alice@Example.com"` and
-`alice@example.com` are the same account.
-
-### Rate limits (per client IP, sliding 60 s window)
-
-| Endpoint | Default | Env |
-|---|---|---|
-| `/auth/signup` | 5 / 60 s | `RATE_LIMIT_SIGNUP` |
-| `/auth/login` | 10 / 60 s | `RATE_LIMIT_LOGIN` |
-| `/auth/refresh` and `/auth/logout` (shared counter) | 30 / 60 s | `RATE_LIMIT_REFRESH` |
-
-What counts toward a limit:
-
-- **Counted:** every request whose body parses as JSON (or that has no body), including
-  ones that then fail schema validation with a 422. Examples are missing fields, wrong
-  types, unknown fields and a bad email or password format.
-- **Not counted:** a body that is **not parseable JSON**. FastAPI rejects it with
-  `422 validation_error` (detail `type` = `json_invalid`) before route dependencies run,
-  so the limiter never sees it. This is accepted: such a request does no bcrypt and no
-  database work.
-
-The same rules apply to the per-user `/chat` limits. Going over a limit returns
-`429 rate_limited` with a `Retry-After: <seconds>` header.
-
-### `POST /auth/signup` → `201`
-
-```json
-{ "email": "alice@example.com", "password": "correct horse battery" }
-```
-
-- `email`: a valid address, normalized as described above.
-- `password`: **8 to 72 bytes of UTF-8** (bcrypt's limit; we reject longer passwords rather
-  than truncate them) and no NUL characters.
-
-Response `201`. This returns the public user and **no tokens**. Call `/auth/login` next.
-
-```json
-{ "id": "6ae4438adafc08ce8666cf6e", "email": "alice@example.com", "created_at": "2026-10-30T07:13:14.451000Z" }
-```
-
-| HTTP | `code` | When |
-|---|---|---|
-| 409 | `email_taken` | The email is already registered. |
-| 422 | `validation_error` | Bad email, password outside policy, missing or unknown fields. |
-| 429 | `rate_limited` | Over the signup limit. |
-
-### `POST /auth/login` → `200`
-
-```json
-{ "email": "alice@example.com", "password": "correct horse battery" }
-```
-
-Login accepts any non-empty password of up to 1024 characters. The signup policy is not
-checked here, so a password that breaks the policy just fails like any other wrong password.
-
-Response `200`:
-
-```json
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIs...",
-  "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
-  "token_type": "bearer",
-  "expires_in": 900
-}
-```
-
-| HTTP | `code` | When |
-|---|---|---|
-| 401 | `invalid_credentials` | Unknown email **or** wrong password. The body is identical in both cases. |
-| 422 | `validation_error` | Malformed body. |
-| 429 | `rate_limited` | Over the login limit. |
-
-### `POST /auth/refresh` → `200`
-
-```json
-{ "refresh_token": "eyJhbGciOiJIUzI1NiIs..." }
-```
-
-Response `200`: a **new** pair with the same shape as login. The refresh token you sent is
-now dead. Store the new one and throw the old one away.
-
-Every rejected refresh gets the same response: `401 invalid_token` with the same body.
-What happens on the server differs:
-
-| Case | Response | Other sessions of the user |
-|---|---|---|
-| Malformed, forged, wrong-type (e.g. an access token) or expired token (expired means `now >= exp`) | 401 `invalid_token` | untouched |
-| Token whose session was **evicted** (a 6th login pushed it out) | 401 `invalid_token` | untouched |
-| Token that was **logged out** (`/auth/logout`) | 401 `invalid_token` | untouched |
-| Validly signed token that was never stored (e.g. user deleted) | 401 `invalid_token` | untouched |
-| Token that was **already exchanged** at `/auth/refresh` (replay), including the loser of two parallel refreshes with the same token | 401 `invalid_token` | **all revoked**: every device must log in again |
-
-| HTTP | `code` | When |
-|---|---|---|
-| 401 | `invalid_token` | Any row of the table above. |
-| 422 | `validation_error` | Malformed body. |
-| 429 | `rate_limited` | Over the refresh limit. |
-
-**Reuse detection.** The server remembers the last 20 refresh tokens it exchanged per user
-(until each one expires). If one of them is presented again, the server assumes it was stolen
-and **revokes every session of that user**. That one revocation also clears the memory of
-exchanged tokens, so replaying the same stolen token again later is a plain 401 and does not
-keep logging the user out. Access tokens already issued stay valid until they expire (at most
-15 min). So clients must:
-
-1. Refresh **one at a time** (single-flight). If several requests get 401 together, run
-   one `/auth/refresh` and let the others wait for its result. Two parallel refreshes with
-   the same token count as a replay and log the user out everywhere.
-2. Persist the new refresh token **before** using the new access token.
-
-### `POST /auth/logout` → `204`
-
-```json
-{ "refresh_token": "eyJhbGciOiJIUzI1NiIs..." }
-```
-
-This revokes that one refresh session (that device). It is idempotent: logging out with an
-already revoked or expired (but genuine) refresh token also returns `204`, with no body.
-Access tokens already issued stay valid until they expire (at most 15 min), because access
-tokens are never checked against the database. The client should discard its access token
-at the same time.
-
-| HTTP | `code` | When |
-|---|---|---|
-| 401 | `invalid_token` | Malformed, forged or wrong-type token. |
-| 422 | `validation_error` | Malformed body. |
-| 429 | `rate_limited` | Over the refresh/logout limit. |
-
-### Using protected endpoints
-
-```
-Authorization: Bearer <access_token>
-```
-
-| HTTP | `code` | Client action |
-|---|---|---|
-| 401 | `not_authenticated` | No bearer header was sent. Attach the token. |
-| 401 | `invalid_token` | Expired or invalid access token. Call `/auth/refresh` once (single-flight) and retry. If refresh also returns 401, send the user to login. |
-
-All 401 responses carry `WWW-Authenticate: Bearer`.
-
-Recommended client loop: call the API. On `401 invalid_token`, refresh once, then retry once.
-If that fails, show the login screen. A client can also refresh shortly before `expires_in`
-runs out.
-
-Example (PowerShell):
-
-```powershell
-$t = Invoke-RestMethod -Method Post http://localhost:8000/auth/login -ContentType "application/json" `
-  -Body '{"email": "alice@example.com", "password": "correct horse battery"}'
-Invoke-RestMethod -Method Post http://localhost:8000/auth/refresh -ContentType "application/json" `
-  -Body (@{ refresh_token = $t.refresh_token } | ConvertTo-Json)
-```

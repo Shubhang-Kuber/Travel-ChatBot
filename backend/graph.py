@@ -149,14 +149,9 @@ def load_graph(settings: Settings) -> TravelGraph:
 # --------------------------------------------------------------------------- calling
 
 
-def graph_thread_id(user_id: str, thread_id: str) -> str:
-    """Namespace the client's thread id per user so users cannot read each other's memory."""
-    return f"{user_id}:{thread_id}"
-
-
-def build_graph_call(user_id: str, thread_id: str, message: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def build_graph_call(thread_id: str, message: str) -> tuple[dict[str, Any], dict[str, Any]]:
     graph_input = {"messages": [{"role": "user", "content": message}]}
-    config = {"configurable": {"thread_id": graph_thread_id(user_id, thread_id)}}
+    config = {"configurable": {"thread_id": thread_id}}
     return graph_input, config
 
 
@@ -181,12 +176,12 @@ def _final_text(result: Any) -> str:
     return content_to_text(content)
 
 
-async def run_chat(graph: TravelGraph, user_id: str, thread_id: str, message: str) -> str:
-    graph_input, config = build_graph_call(user_id, thread_id, message)
+async def run_chat(graph: TravelGraph, thread_id: str, message: str) -> str:
+    graph_input, config = build_graph_call(thread_id, message)
     try:
         result = await run_in_threadpool(graph.invoke, graph_input, config)
         return _final_text(result)
     except Exception:
         # Never log message content (user data); length is enough to correlate.
-        log.exception("Graph invoke failed (user_id=%s, message_len=%d)", user_id, len(message))
+        log.exception("Graph invoke failed (message_len=%d)", len(message))
         raise AppError(502, "upstream_error", "The travel agent failed to respond.") from None

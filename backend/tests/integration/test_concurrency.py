@@ -19,9 +19,9 @@ DELAY = 0.5
 RESULTS: dict[int, float] = {}
 
 
-async def _burst(api: Api, token: str, n: int) -> float:
+async def _burst(api: Api, n: int) -> float:
     t0 = time.perf_counter()
-    rs = await asyncio.gather(*(api.chat(token, f"msg {i}", f"conc-{n}-{i}") for i in range(n)))
+    rs = await asyncio.gather(*(api.chat(f"msg {i}", f"conc-{n}-{i}") for i in range(n)))
     wall = time.perf_counter() - t0
     assert [r.status_code for r in rs] == [200] * n, [r.text for r in rs if r.status_code != 200]
     return wall
@@ -30,8 +30,7 @@ async def _burst(api: Api, token: str, n: int) -> float:
 @pytest.mark.parametrize("n", [1, 5, 10, 20])
 async def test_concurrent_chat_is_not_serial(app_with, n: int, record_property) -> None:
     async with app_with(mock_graph_delay_seconds=DELAY) as api:
-        _, t = await api.new_user()
-        wall = await _burst(api, t["access_token"], n)
+        wall = await _burst(api, n)
     RESULTS[n] = wall
     record_property("wall_seconds", round(wall, 3))
     serial = DELAY * n
@@ -43,8 +42,7 @@ async def test_concurrent_chat_is_not_serial(app_with, n: int, record_property) 
 
 async def test_event_loop_stays_responsive_during_chat_burst(app_with, record_property) -> None:
     async with app_with(mock_graph_delay_seconds=DELAY) as api:
-        _, t = await api.new_user()
-        burst = asyncio.create_task(_burst(api, t["access_token"], 20))
+        burst = asyncio.create_task(_burst(api, 20))
         await asyncio.sleep(0.1)  # let the 20 graph calls occupy worker threads
         t0 = time.perf_counter()
         r = await api.client.get("/health")
@@ -61,8 +59,7 @@ async def test_beyond_threadpool_capacity_requests_queue(app_with, record_proper
     # so wall time is ~2 x DELAY rather than ~1 x DELAY. Documents the ceiling.
     n = 50
     async with app_with(mock_graph_delay_seconds=DELAY) as api:
-        _, t = await api.new_user()
-        wall = await _burst(api, t["access_token"], n)
+        wall = await _burst(api, n)
     record_property("wall_seconds", round(wall, 3))
     print(f"\n[TaskD] N={n}  wall={wall:.3f}s  (threadpool limit 40 => 2 waves expected)")
     assert DELAY * 1.9 <= wall < DELAY * 3.5

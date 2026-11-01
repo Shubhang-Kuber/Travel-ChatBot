@@ -69,31 +69,17 @@ def test_content_to_text_rejects_unsupported(bad) -> None:
 # ------------------------------------------------------------------ run_chat
 
 
-async def test_input_and_namespaced_thread_id() -> None:
+async def test_input_and_thread_id() -> None:
     g = RecordingGraph()
-    await run_chat(g, "0123456789abcdef01234567", "trip-1", "Plan Lisbon")
+    await run_chat(g, "trip-1", "Plan Lisbon")
     (inp, cfg, _), = g.calls
     assert inp == {"messages": [{"role": "user", "content": "Plan Lisbon"}]}
-    assert cfg == {"configurable": {"thread_id": "0123456789abcdef01234567:trip-1"}}
-
-
-async def test_client_thread_id_recoverable_after_last_colon() -> None:
-    g = RecordingGraph()
-    await run_chat(g, "aaaaaaaaaaaaaaaaaaaaaaaa", "t_9-x", "hi")
-    tid = g.calls[0][1]["configurable"]["thread_id"]
-    assert tid.rsplit(":", 1) == ["aaaaaaaaaaaaaaaaaaaaaaaa", "t_9-x"]
-
-
-async def test_same_client_thread_different_users_differ() -> None:
-    g = RecordingGraph()
-    await run_chat(g, "a" * 24, "shared", "hi")
-    await run_chat(g, "b" * 24, "shared", "hi")
-    assert g.calls[0][1] != g.calls[1][1]
+    assert cfg == {"configurable": {"thread_id": "trip-1"}}
 
 
 async def test_invoke_runs_off_the_event_loop_thread() -> None:
     g = RecordingGraph()
-    await run_chat(g, "a" * 24, "t", "hi")
+    await run_chat(g, "t", "hi")
     assert g.calls[0][2] != threading.get_ident()
 
 
@@ -107,7 +93,7 @@ async def test_invoke_runs_off_the_event_loop_thread() -> None:
 )
 async def test_reads_only_last_message(last, expected: str) -> None:
     g = RecordingGraph(result={"messages": [{"role": "user", "content": "ignored"}, Msg("ignored"), last]})
-    assert await run_chat(g, "a" * 24, "t", "hi") == expected
+    assert await run_chat(g, "t", "hi") == expected
 
 
 @pytest.mark.parametrize(
@@ -125,18 +111,18 @@ async def test_reads_only_last_message(last, expected: str) -> None:
 )
 async def test_failures_become_502_upstream_error(graph) -> None:
     with pytest.raises(AppError) as exc:
-        await run_chat(graph, "a" * 24, "t", "hi")
+        await run_chat(graph, "t", "hi")
     assert exc.value.status_code == 502 and exc.value.code == "upstream_error"
     assert exc.value.details is None
 
 
-async def test_failure_log_has_user_and_length_but_never_message_text(caplog) -> None:
+async def test_failure_log_has_length_but_never_message_text(caplog) -> None:
     secret = "my passport number is X1234567"
     caplog.set_level(logging.DEBUG)
     with pytest.raises(AppError):
-        await run_chat(RecordingGraph(exc=RuntimeError("boom")), "c" * 24, "t", secret)
+        await run_chat(RecordingGraph(exc=RuntimeError("boom")), "t", secret)
     text = "\n".join(r.getMessage() for r in caplog.records)
-    assert "c" * 24 in text and str(len(secret)) in text
+    assert str(len(secret)) in text
     assert secret not in caplog.text
 
 

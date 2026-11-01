@@ -14,7 +14,10 @@ def get_llm() -> BaseChatModel:
 		raise RuntimeError("GROQ_API_KEY must be set")
 
 	return ChatGroq(
-		model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+		model=os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
+		# gpt-oss thinks before answering; "low" keeps each call fast. Reasoning
+		# comes back outside .content, so it never reaches the user.
+		reasoning_effort=os.getenv("GROQ_REASONING_EFFORT", "low") or None,
 		api_key=api_key,
 		temperature=0.2,
 		timeout=30,

@@ -69,7 +69,7 @@ def _on_event_loop(func: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap a trivial sync dependency as ``async def`` with the same (resolved) signature.
 
     FastAPI runs a plain ``def`` dependency through the threadpool, so it would queue for
-    one of AnyIO's 40 worker tokens behind long graph/bcrypt calls. Key functions only read
+    one of AnyIO's 40 worker tokens behind long graph calls. Key functions only read
     the request, so running them inline on the loop is both safe and faster.
     """
 
@@ -85,7 +85,7 @@ def rate_limit(bucket: str, key_func: Callable[..., Any]) -> Callable[..., Any]:
     """Build a dependency enforcing the ``bucket`` limit from settings.
 
     ``key_func`` is itself resolved as a FastAPI dependency, so it can take a
-    ``Request`` (see ``client_ip``) or depend on the authenticated user. A sync
+    ``Request`` (see ``client_ip``). A sync
     ``key_func`` is run on the event loop (see ``_on_event_loop``), so it must not block.
     """
     key_dep = key_func if inspect.iscoroutinefunction(key_func) else _on_event_loop(key_func)

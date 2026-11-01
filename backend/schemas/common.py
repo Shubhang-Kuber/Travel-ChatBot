@@ -14,11 +14,10 @@ class ErrorBody(BaseModel):
 
 
 class ErrorResponse(BaseModel):
-    """Every non-2xx response (except /health's 503) has this shape."""
+    """Every non-2xx response has this shape."""
 
     error: ErrorBody
 
 
 class HealthResponse(BaseModel):
-    status: Literal["ok", "degraded"]
-    mongo: Literal["up", "down"]
+    status: Literal["ok"]

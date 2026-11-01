@@ -1,6 +1,6 @@
 """Error envelope and exception handlers.
 
-Every non-2xx response (except /health's 503 status report) is
+Every non-2xx response is
 ``{"error": {"code": ..., "message": ..., "details": [...] | null}}``.
 """
 
@@ -52,8 +52,6 @@ def error_response(
     headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     out_headers = dict(headers or {})
-    if status_code == 401:
-        out_headers.setdefault("WWW-Authenticate", "Bearer")
     body = ErrorResponse(error=ErrorBody(code=code, message=message, details=details))
     return JSONResponse(status_code=status_code, content=body.model_dump(), headers=out_headers or None)
 
@@ -69,7 +67,7 @@ async def _http_exception_handler(_: Request, exc: StarletteHTTPException) -> JS
 
 
 async def _validation_error_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
-    # Deliberately drop "input" and "ctx": inputs may contain passwords/tokens.
+    # Deliberately drop "input" and "ctx": keep user input out of error bodies.
     details = [{"loc": list(e.get("loc", ())), "msg": e.get("msg", ""), "type": e.get("type", "")} for e in exc.errors()]
     return error_response(422, "validation_error", "Request validation failed.", details)
 

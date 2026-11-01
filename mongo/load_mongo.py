@@ -1,6 +1,6 @@
 """Load mongo_data/ into MongoDB Atlas: `posts` + `chunks` (with float32 BinData vectors) + search indexes.
 
-Env: MONGODB_URI (or MONGO_URI) = Atlas connection string, TIPS_DB (default "travel"; MONGO_DB is the backend's).
+Env: MONGODB_URI (or MONGO_URI) = Atlas connection string, TIPS_DB (default "travel").
 Usage: python load_mongo.py              # upsert everything (safe to rerun) + create indexes
        python load_mongo.py --drop       # drop both collections first, then load
 Fits Atlas M0 (~360 MB of 512 MB): embed_text is not stored, vectors are float32 BinData (not double arrays).

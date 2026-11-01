@@ -41,10 +41,10 @@ def _chunk_text(chunk: Any) -> str:
 
 
 async def stream_chat_events(
-    graph: TravelGraph, stream_node: str, user_id: str, thread_id: str, message: str
+    graph: TravelGraph, stream_node: str, thread_id: str, message: str
 ) -> AsyncIterator[str]:
     """Yield ``token``* then ``done``, or ``token``* then ``error`` if the graph fails."""
-    graph_input, config = build_graph_call(user_id, thread_id, message)
+    graph_input, config = build_graph_call(thread_id, message)
     sent = 0
     chunks: Any = None
     try:
@@ -58,7 +58,7 @@ async def stream_chat_events(
                 yield sse_event("token", {"content": text})
     except Exception:
         # The 200 status is already sent, so the error travels as an in-band event.
-        log.exception("Graph stream failed (user_id=%s, message_len=%d, tokens_sent=%d)", user_id, len(message), sent)
+        log.exception("Graph stream failed (message_len=%d, tokens_sent=%d)", len(message), sent)
         body = ErrorResponse(error=ErrorBody(code="upstream_error", message="The travel agent failed to respond."))
         yield sse_event("error", body.model_dump())
         return

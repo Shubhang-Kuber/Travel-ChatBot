@@ -1,10 +1,13 @@
 import json
+import logging
 import os
+from http.client import HTTPException
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -14,11 +17,32 @@ from agent.llm import get_llm
 from agent.state import AgentState
 
 
+log = logging.getLogger(__name__)
+
 SearchFunction = Callable[[str, str | None], list[dict[str, Any]]]
 
 MAX_RETRIES = 2
-# LangGraph skips LLM calls carrying this tag in stream_mode="messages".
-NOSTREAM = {"tags": ["nostream"]}
+# The grader only needs a taste of each chunk; full text goes to generate alone.
+GRADE_SNIPPET_CHARS = 300
+
+GENERATE_PROMPT = """You are a travel planning assistant. Answer using the supplied context.
+Do not invent facts. Mention uncertain or missing information in the Notes.
+
+Write plain text only. Never output JSON, code blocks, or markdown symbols such as #, ** or |.
+
+For a trip plan use exactly this layout:
+Itinerary for <destination>
+
+Day 1: <short title>
+<one-line summary>
+- <activity>
+- <activity>
+
+Notes
+- <note>
+
+For any other question (weather, currency, a single tip), answer directly in short
+sentences or "- " bullet lines."""
 
 
 def _get_json(url: str, request: Request | None = None) -> dict[str, Any]:
@@ -27,7 +51,7 @@ def _get_json(url: str, request: Request | None = None) -> dict[str, Any]:
     try:
         with urlopen(request or url, timeout=10) as response:
             return json.loads(response.read().decode("utf-8"))
-    except (HTTPError, URLError, TimeoutError) as error:
+    except (HTTPError, URLError, HTTPException, TimeoutError, ValueError) as error:
         raise RuntimeError(f"Request failed: {url}") from error
 
 
@@ -69,7 +93,7 @@ def get_weather(location: str, dates: list[str] | None = None) -> dict[str, Any]
 
     geocode_url = (
         "https://geocoding-api.open-meteo.com/v1/search"
-        f"?name={location}&count=1&language=en&format=json"
+        f"?name={quote(location)}&count=1&language=en&format=json"
     )
     geocoded = _get_json(geocode_url)
     locations = geocoded.get("results", [])
@@ -123,7 +147,7 @@ def convert_currency(
     target = to_currency.upper()
     url = (
         "https://api.frankfurter.app/latest"
-        f"?amount={amount}&from={source}&to={target}"
+        f"?amount={amount}&from={quote(source)}&to={quote(target)}"
     )
     result = _get_json(url)
     rates = result.get("rates", {})
@@ -137,57 +161,61 @@ def convert_currency(
     }
 
 
-def _as_items(value: Any) -> list[str]:
-    """Return a list of non-empty strings; a lone string is one item, not characters."""
+def _docs_text(documents: list[dict[str, Any]], snippet_chars: int | None = None) -> str:
+    """Render stored posts as plain text (plain text in keeps JSON out of the reply)."""
 
-    if not value:
-        return []
-    if isinstance(value, str):
-        value = [part.lstrip("-*• \t") for part in value.splitlines()]
-    elif not isinstance(value, (list, tuple)):
-        value = [value]
-    return [text for text in (_item_text(item) for item in value) if text]
-
-
-def _item_text(item: Any) -> str:
-    """Render one activity/note; dicts become 'Name: description', never raw JSON."""
-
-    if isinstance(item, dict):
-        name = str(item.get("name") or item.get("title") or item.get("activity") or "").strip()
-        detail = str(item.get("description") or item.get("details") or "").strip()
-        if name and detail:
-            return f"{name}: {detail}"
-        if name or detail:
-            return name or detail
-        return ", ".join(str(v).strip() for v in item.values() if str(v).strip())
-    return str(item).strip()
+    lines = []
+    for number, doc in enumerate(documents, start=1):
+        lines.append(f"[{number}] {doc.get('title', '')}".rstrip())
+        for chunk in doc.get("chunks", []):
+            text = " ".join(str(chunk.get("text", "")).split())
+            if snippet_chars:
+                text = text[:snippet_chars]
+            if text:
+                lines.append(f"- {text}")
+    return "\n".join(lines)
 
 
-def build_itinerary(structured_plan: dict[str, Any]) -> dict[str, Any]:
-    """Normalize a generated itinerary into the backend response shape."""
+def _context_text(state: AgentState, documents: list[dict[str, Any]]) -> str:
+    """Everything generate may use, as readable sections instead of a JSON dump."""
 
-    destination = structured_plan.get("destination")
-    days = structured_plan.get("days", [])
-    lines = [f"Itinerary for {destination}" if destination else "Itinerary"]
+    sections = []
+    if documents:
+        sections.append("Stored travel tips:\n" + _docs_text(documents))
 
-    for position, day in enumerate(days, start=1):
-        day_number = day.get("day", position)
-        title = day.get("title", "")
-        summary = day.get("summary") or day.get("description")
-        lines.append(f"\nDay {day_number}: {title}" if title else f"\nDay {day_number}")
-        if isinstance(summary, str) and summary.strip():
-            lines.append(summary.strip())
-        lines.extend(f"- {item}" for item in _as_items(day.get("activities")))
+    web_results = state.get("web_results") or []
+    if web_results:
+        lines = [
+            f"[{n}] {r.get('title', '')} ({r.get('url', '')})\n{r.get('content', '')}"
+            for n, r in enumerate(web_results, start=1)
+        ]
+        sections.append("Web results:\n" + "\n".join(lines))
 
-    notes = _as_items(structured_plan.get("notes"))
-    if notes:
-        lines.append("\nNotes")
-        lines.extend(f"- {note}" for note in notes)
+    weather = state.get("weather_results")
+    if weather:
+        if weather.get("error"):
+            sections.append(f"Weather: unavailable for {weather.get('location')} ({weather['error']})")
+        else:
+            lines = [
+                f"- {d['date']}: {d['temperature_min']} to {d['temperature_max']} C, "
+                f"rain chance {d['precipitation_probability']}%"
+                for d in weather.get("forecast", [])
+            ]
+            place = ", ".join(p for p in (weather.get("location"), weather.get("country")) if p)
+            sections.append(f"Weather forecast for {place}:\n" + ("\n".join(lines) or "- no days in range"))
 
-    return {
-        **structured_plan,
-        "text": "\n".join(lines),
-    }
+    currency = state.get("currency_results")
+    if currency:
+        if currency.get("error"):
+            sections.append(f"Currency: unavailable ({currency['error']})")
+        else:
+            sections.append(
+                f"Currency: {currency['amount']} {currency['from_currency']} = "
+                f"{currency['converted_amount']} {currency['to_currency']} "
+                f"(rate date {currency['rate_date']})"
+            )
+
+    return "\n\n".join(sections) or "No extra context was found."
 
 
 class TravelPlan(BaseModel):
@@ -217,14 +245,6 @@ class RelevanceGrade(BaseModel):
     is_relevant: bool = Field(
         description="Whether the retrieved documents answer the user's request"
     )
-
-
-class ItineraryPlan(BaseModel):
-    """Structured itinerary generated from the available context."""
-
-    destination: str | None = None
-    days: list[dict[str, Any]] = Field(default_factory=list)
-    notes: list[str] = Field(default_factory=list)
 
 
 def create_graph(
@@ -283,7 +303,6 @@ def create_graph(
             "to_currency": plan.to_currency,
             "retry_count": 0,
             "retrieval_is_relevant": False,
-            "itinerary": None,
         }
 
     def retrieve_node(state: AgentState) -> dict[str, Any]:
@@ -303,7 +322,12 @@ def create_graph(
         destination = state.get("destination")
         search_query = f"{destination}: {query}" if destination else query
 
-        return {"web_results": live_search(search_query)}
+        try:
+            return {"web_results": live_search(search_query)}
+        except RuntimeError:
+            # A flaky free API must not kill the turn; generate answers without it.
+            log.warning("Web search failed", exc_info=True)
+            return {"web_results": []}
 
     def supplemental_tools_node(state: AgentState) -> dict[str, Any]:
         """Run requested weather and currency tools after live fallback."""
@@ -314,10 +338,17 @@ def create_graph(
         }
 
         if state.get("needs_weather") and state.get("weather_location"):
-            updates["weather_results"] = get_weather(
-                state["weather_location"],
-                state.get("weather_dates", []),
-            )
+            try:
+                updates["weather_results"] = get_weather(
+                    state["weather_location"],
+                    state.get("weather_dates", []),
+                )
+            except RuntimeError:
+                log.warning("Weather lookup failed", exc_info=True)
+                updates["weather_results"] = {
+                    "location": state["weather_location"],
+                    "error": "weather service unreachable",
+                }
 
         currency_values = (
             state.get("currency_amount"),
@@ -325,11 +356,15 @@ def create_graph(
             state.get("to_currency"),
         )
         if state.get("needs_currency") and all(value is not None for value in currency_values):
-            updates["currency_results"] = convert_currency(
-                state["currency_amount"],
-                state["from_currency"],
-                state["to_currency"],
-            )
+            try:
+                updates["currency_results"] = convert_currency(
+                    state["currency_amount"],
+                    state["from_currency"],
+                    state["to_currency"],
+                )
+            except RuntimeError:
+                log.warning("Currency lookup failed", exc_info=True)
+                updates["currency_results"] = {"error": "currency service unreachable"}
 
         return updates
 
@@ -351,12 +386,9 @@ def create_graph(
                     )
                 ),
                 HumanMessage(
-                    content=json.dumps(
-                        {
-                            "query": query,
-                            "stored_documents": documents,
-                        },
-                        default=str,
+                    content=(
+                        f"Query: {query}\n\nRetrieved documents:\n"
+                        f"{_docs_text(documents, GRADE_SNIPPET_CHARS) or 'none'}"
                     )
                 ),
             ]
@@ -414,52 +446,30 @@ def create_graph(
         return "web_search"
 
     def generate_node(state: AgentState) -> dict[str, Any]:
-        """Generate and normalize the final itinerary from available context."""
+        """Write the final answer as plain text; its tokens stream to the user live.
+
+        Plain-text output (no structured output) is what makes token streaming safe:
+        there is no JSON to hide. The context also goes in as plain text, so the model
+        has no JSON to copy.
+        """
 
         documents = (
             state.get("retrieved_docs", [])
             if state.get("retrieval_is_relevant", False)
             else []
         )
-        web_results = state.get("web_results", [])
-        itinerary_generator = model.with_structured_output(ItineraryPlan)
 
-        structured_plan = itinerary_generator.invoke(
+        response = model.invoke(
             [
-                SystemMessage(
-                    content=(
-                        "You are a travel planning assistant. "
-                        "Create a practical itinerary using the supplied context. "
-                        "Do not invent facts. Put uncertain information in notes."
-                    )
-                ),
+                SystemMessage(content=GENERATE_PROMPT),
                 *state["messages"][-6:],
-                HumanMessage(
-                    content=json.dumps(
-                        {
-                            "stored_travel_tips": documents,
-                            "web_results": web_results,
-                            "weather": state.get("weather_results"),
-                            "currency": state.get("currency_results"),
-                        },
-                        default=str,
-                    )
-                ),
-            ],
-            # Raw structured-output JSON must not reach the user; the formatted
-            # AIMessage this node returns is what gets streamed.
-            config=NOSTREAM,
+                HumanMessage(content="Context:\n\n" + _context_text(state, documents)),
+            ]
         )
 
-        itinerary = build_itinerary(structured_plan.model_dump())
-        answer = itinerary["text"]
-
-        return {
-            "itinerary": itinerary,
-            "messages": [
-                AIMessage(content=answer),
-            ],
-        }
+        # Return the streamed message itself: LangGraph dedupes it by id, so the user
+        # does not receive the answer twice.
+        return {"messages": [response]}
 
     builder = StateGraph(AgentState)
 

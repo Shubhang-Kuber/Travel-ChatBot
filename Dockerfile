@@ -67,7 +67,7 @@ WORKDIR /app
 COPY --from=src /src /app
 USER app
 EXPOSE 8000
-# Stdlib only (no curl in slim). urlopen raises on 503, so "mongo down" => unhealthy.
+# Stdlib only (no curl in slim).
 HEALTHCHECK --interval=10s --timeout=5s --start-period=45s --start-interval=2s --retries=3 \
     CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"]
 # Exactly ONE worker: the rate limiter is in-process state (see backend/ratelimit.py).

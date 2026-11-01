@@ -1,7 +1,7 @@
 """Hybrid retrieval over the Atlas `chunks` collection (plan B4-B6): $vectorSearch + $search, client-side RRF,
 grouped by post. Entry point for the agent: search_stored_tips(query, destination).
 
-Env: MONGODB_URI = Atlas connection string (not MONGO_URI: that one is the backend's local Mongo),
+Env: MONGODB_URI = Atlas connection string,
      TIPS_DB (default "travel"), plus EMBED_HOST / EMBED_MODEL / EMBED_AUTH for the query embedding
      (see preprocessing/embed_chunks.py; must be the same model the chunks were embedded with).
 Usage: python -m data.search "japan rail pass worth it?" --dest Japan

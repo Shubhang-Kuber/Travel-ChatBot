@@ -22,4 +22,3 @@ class AgentState(TypedDict, total=False):
     to_currency: str | None
     retry_count: int
     retrieval_is_relevant: bool
-    itinerary: dict[str, Any] | None

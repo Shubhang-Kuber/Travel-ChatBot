@@ -1,8 +1,4 @@
-"""Error envelope + the real ``create_app`` WITHOUT its lifespan (so: no MongoDB at all).
-
-Running /chat on an app that has no database attached is itself evidence for hard
-constraint 1: if a protected request touched the DB, it would fail here.
-"""
+"""Error envelope + the real ``create_app`` WITHOUT its lifespan."""
 
 from __future__ import annotations
 
@@ -10,16 +6,12 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict
 
-from backend.auth.tokens import create_access_token
 from backend.errors import AppError, install_exception_handlers
 from backend.graph import MockGraph
 from backend.main import create_app
-from backend.tests.helpers import USER_ID, assert_envelope, bearer, client_for, make_settings
+from backend.tests.helpers import assert_envelope, client_for, make_settings
 
 pytestmark = pytest.mark.unit
-
-SETTINGS = make_settings()
-
 
 class Body(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -34,10 +26,6 @@ def envelope_app() -> FastAPI:
     @app.get("/app-error")
     async def app_error():
         raise AppError(418, "teapot", "Short and stout.", headers={"X-Extra": "1"})
-
-    @app.get("/app-error-401")
-    async def app_error_401():
-        raise AppError(401, "invalid_token", "nope")
 
     @app.get("/http-error")
     async def http_error():
@@ -64,11 +52,6 @@ async def test_app_error_envelope_and_headers() -> None:
     assert_envelope(r, 418, "teapot")
     assert r.json()["error"]["message"] == "Short and stout."
     assert r.headers["x-extra"] == "1"
-
-
-async def test_every_401_gets_www_authenticate() -> None:
-    async with client_for(envelope_app()) as c:
-        assert_envelope(await c.get("/app-error-401"), 401, "invalid_token")
 
 
 async def test_http_exception_mapped() -> None:
@@ -116,24 +99,15 @@ async def test_bad_json_bodies_are_validation_errors(content: bytes, ctype: str)
 
 def bare_app(**settings_over) -> FastAPI:
     app = create_app(make_settings(**settings_over))
-    app.state.graph = MockGraph()  # what the lifespan would set; there is NO mongo/db
+    app.state.graph = MockGraph()  # what the lifespan would set
     return app
 
 
-async def test_chat_works_with_no_database_attached() -> None:
-    app = bare_app()
-    assert not hasattr(app.state, "db") and not hasattr(app.state, "mongo_client")
-    async with client_for(app) as c:
-        r = await c.post(
-            "/chat", json={"message": "hello", "thread_id": "t1"}, headers=bearer(create_access_token(USER_ID, SETTINGS))
-        )
+async def test_chat_works_without_login() -> None:
+    async with client_for(bare_app()) as c:
+        r = await c.post("/chat", json={"message": "hello", "thread_id": "t1"})
     assert r.status_code == 200, r.text
     assert set(r.json()) == {"response", "thread_id"} and r.json()["thread_id"] == "t1"
-
-
-async def test_chat_unauthenticated_on_bare_app() -> None:
-    async with client_for(bare_app()) as c:
-        assert_envelope(await c.post("/chat", json={"message": "hi"}), 401, "not_authenticated")
 
 
 async def test_404_and_405_envelopes() -> None:
@@ -151,14 +125,14 @@ async def test_cors_preflight_allowed_origin() -> None:
             headers={
                 "Origin": "http://localhost:8501",
                 "Access-Control-Request-Method": "POST",
-                "Access-Control-Request-Headers": "Authorization, Content-Type",
+                "Access-Control-Request-Headers": "Content-Type",
             },
         )
     assert r.status_code == 200
     assert r.headers["access-control-allow-origin"] == "http://localhost:8501"
     allowed = r.headers["access-control-allow-methods"]
     assert "POST" in allowed and "GET" in allowed
-    assert "authorization" in r.headers["access-control-allow-headers"].lower()
+    assert "content-type" in r.headers["access-control-allow-headers"].lower()
     assert "access-control-allow-credentials" not in r.headers
 
 
@@ -172,9 +146,8 @@ async def test_cors_disallowed_origin_gets_no_allow_header() -> None:
 
 async def test_cors_origins_from_settings_and_retry_after_exposed() -> None:
     app = bare_app(cors_origins=("https://app.example",), limits={"chat": "1/60"})
-    tok = create_access_token(USER_ID, SETTINGS)
     async with client_for(app) as c:
-        h = {**bearer(tok), "Origin": "https://app.example"}
+        h = {"Origin": "https://app.example"}
         r1 = await c.post("/chat", json={"message": "a"}, headers=h)
         r2 = await c.post("/chat", json={"message": "b"}, headers=h)
         default_origin = await c.options(
@@ -190,8 +163,7 @@ def test_module_level_app_is_lazy(monkeypatch) -> None:
     import backend.main as main
     from backend.config import get_settings
 
-    # Importing backend.main must not need JWT_SECRET; accessing .app builds from env.
-    monkeypatch.setenv("JWT_SECRET", "z" * 40)
+    # Importing backend.main must not build the app; accessing .app builds from env.
     get_settings.cache_clear()
     main.__dict__.pop("app", None)
     try:
@@ -272,7 +244,7 @@ async def test_500_from_real_app_has_cors_header() -> None:
         r = await c.post(
             "/chat",
             json={"message": "hi"},
-            headers={**bearer(create_access_token(USER_ID, SETTINGS)), "Origin": "http://localhost:3000"},
+            headers={"Origin": "http://localhost:3000"},
         )
     assert_envelope(r, 500, "internal_error")
     assert r.headers["access-control-allow-origin"] == "http://localhost:3000"
